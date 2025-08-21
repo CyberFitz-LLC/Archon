@@ -214,18 +214,36 @@ CREATE TABLE IF NOT EXISTS archon_crawled_pages (
 CREATE INDEX idx_archon_crawled_pages_metadata ON archon_crawled_pages USING GIN (metadata);
 CREATE INDEX idx_archon_crawled_pages_source_id ON archon_crawled_pages (source_id);
 
--- Create indexes for multi-dimensional vectors on archon_crawled_pages
-CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_768 
-ON archon_crawled_pages USING ivfflat (embedding_768 vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1024 
-ON archon_crawled_pages USING ivfflat (embedding_1024 vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1536 
-ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops) WITH (lists = 100);
--- Note: 3072 dimensions exceed index limits, using sequential scan for this dimension
-
 -- Add comments for new embedding tracking columns
 COMMENT ON COLUMN archon_crawled_pages.embedding_model IS 'The embedding model used to generate the embedding (e.g., text-embedding-3-small, all-mpnet-base-v2)';
 COMMENT ON COLUMN archon_crawled_pages.embedding_dimensions IS 'The number of dimensions in the stored embedding vector';
+
+-- Multi-dimensional vector indexes for improved performance
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_768
+ON archon_crawled_pages USING ivfflat (embedding_768 vector_cosine_ops)
+WITH (lists = 1000);
+
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1024
+ON archon_crawled_pages USING ivfflat (embedding_1024 vector_cosine_ops)
+WITH (lists = 1000);
+
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1536
+ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops)
+WITH (lists = 1000);
+
+-- NOTE: pgvector ivfflat indexes do not support vectors with more than 2000 dimensions
+-- For 3072-dimension vectors, we'll use sequential scan which is still performant for most use cases
+-- If index is needed in future, consider using HNSW index type when available in pgvector
+-- CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_3072
+-- ON archon_crawled_pages USING ivfflat (embedding_3072 vector_cosine_ops)
+-- WITH (lists = 1000);
+
+-- Indexes for embedding tracking columns
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_model 
+ON archon_crawled_pages (embedding_model);
+
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_dimensions
+ON archon_crawled_pages (embedding_dimensions);
 
 -- Create the code_examples table
 CREATE TABLE IF NOT EXISTS archon_code_examples (
@@ -255,26 +273,46 @@ CREATE TABLE IF NOT EXISTS archon_code_examples (
 CREATE INDEX idx_archon_code_examples_metadata ON archon_code_examples USING GIN (metadata);
 CREATE INDEX idx_archon_code_examples_source_id ON archon_code_examples (source_id);
 
--- Create indexes for multi-dimensional vectors on archon_code_examples
-CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_768 
-ON archon_code_examples USING ivfflat (embedding_768 vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1024 
-ON archon_code_examples USING ivfflat (embedding_1024 vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1536 
-ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops) WITH (lists = 100);
--- Note: 3072 dimensions exceed index limits, using sequential scan for this dimension
-
 -- Add comments for new embedding tracking columns
 COMMENT ON COLUMN archon_code_examples.embedding_model IS 'The embedding model used to generate the embedding (e.g., text-embedding-3-small, all-mpnet-base-v2)';
 COMMENT ON COLUMN archon_code_examples.embedding_dimensions IS 'The number of dimensions in the stored embedding vector';
+
+-- Multi-dimensional vector indexes for improved performance
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_768
+ON archon_code_examples USING ivfflat (embedding_768 vector_cosine_ops)
+WITH (lists = 1000);
+
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1024
+ON archon_code_examples USING ivfflat (embedding_1024 vector_cosine_ops)
+WITH (lists = 1000);
+
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1536
+ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops)
+WITH (lists = 1000);
+
+-- NOTE: pgvector ivfflat indexes do not support vectors with more than 2000 dimensions
+-- For 3072-dimension vectors, we'll use sequential scan which is still performant for most use cases
+-- CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_3072
+-- ON archon_code_examples USING ivfflat (embedding_3072 vector_cosine_ops)
+-- WITH (lists = 1000);
+
+-- Indexes for embedding tracking columns
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_model 
+ON archon_code_examples (embedding_model);
+
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_dimensions
+ON archon_code_examples (embedding_dimensions);
 
 -- =====================================================
 -- SECTION 5: SEARCH FUNCTIONS
 -- =====================================================
 
--- Create a function to search for documentation chunks
+-- Create a function to search for documentation chunks (supports multi-dimensional embeddings)
 CREATE OR REPLACE FUNCTION match_archon_crawled_pages (
-  query_embedding VECTOR(1536),
+  query_embedding_768 VECTOR(768) DEFAULT NULL,
+  query_embedding_1024 VECTOR(1024) DEFAULT NULL,
+  query_embedding_1536 VECTOR(1536) DEFAULT NULL,
+  query_embedding_3072 VECTOR(3072) DEFAULT NULL,
   match_count INT DEFAULT 10,
   filter JSONB DEFAULT '{}'::jsonb,
   source_filter TEXT DEFAULT NULL
@@ -291,26 +329,67 @@ LANGUAGE plpgsql
 AS $$
 #variable_conflict use_column
 BEGIN
-  RETURN QUERY
-  SELECT
-    id,
-    url,
-    chunk_number,
-    content,
-    metadata,
-    source_id,
-    1 - (archon_crawled_pages.embedding <=> query_embedding) AS similarity
-  FROM archon_crawled_pages
-  WHERE metadata @> filter
-    AND (source_filter IS NULL OR source_id = source_filter)
-  ORDER BY archon_crawled_pages.embedding <=> query_embedding
-  LIMIT match_count;
+  -- Search using 768-dimension embeddings
+  IF query_embedding_768 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, metadata, source_id,
+      1 - (archon_crawled_pages.embedding_768 <=> query_embedding_768) AS similarity
+    FROM archon_crawled_pages
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_768 IS NOT NULL
+    ORDER BY archon_crawled_pages.embedding_768 <=> query_embedding_768
+    LIMIT match_count;
+  -- Search using 1024-dimension embeddings
+  ELSIF query_embedding_1024 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, metadata, source_id,
+      1 - (archon_crawled_pages.embedding_1024 <=> query_embedding_1024) AS similarity
+    FROM archon_crawled_pages
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_1024 IS NOT NULL
+    ORDER BY archon_crawled_pages.embedding_1024 <=> query_embedding_1024
+    LIMIT match_count;
+  -- Search using 1536-dimension embeddings
+  ELSIF query_embedding_1536 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, metadata, source_id,
+      1 - (archon_crawled_pages.embedding_1536 <=> query_embedding_1536) AS similarity
+    FROM archon_crawled_pages
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_1536 IS NOT NULL
+    ORDER BY archon_crawled_pages.embedding_1536 <=> query_embedding_1536
+    LIMIT match_count;
+  -- Search using 3072-dimension embeddings
+  ELSIF query_embedding_3072 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, metadata, source_id,
+      1 - (archon_crawled_pages.embedding_3072 <=> query_embedding_3072) AS similarity
+    FROM archon_crawled_pages
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_3072 IS NOT NULL
+    ORDER BY archon_crawled_pages.embedding_3072 <=> query_embedding_3072
+    LIMIT match_count;
+  -- No query embedding provided
+  ELSE
+    RAISE EXCEPTION 'No query embedding provided';
+  END IF;
 END;
 $$;
 
--- Create a function to search for code examples
+-- Create a function to search for code examples (supports multi-dimensional embeddings)
 CREATE OR REPLACE FUNCTION match_archon_code_examples (
-  query_embedding VECTOR(1536),
+  query_embedding_768 VECTOR(768) DEFAULT NULL,
+  query_embedding_1024 VECTOR(1024) DEFAULT NULL,
+  query_embedding_1536 VECTOR(1536) DEFAULT NULL,
+  query_embedding_3072 VECTOR(3072) DEFAULT NULL,
   match_count INT DEFAULT 10,
   filter JSONB DEFAULT '{}'::jsonb,
   source_filter TEXT DEFAULT NULL
@@ -328,21 +407,58 @@ LANGUAGE plpgsql
 AS $$
 #variable_conflict use_column
 BEGIN
-  RETURN QUERY
-  SELECT
-    id,
-    url,
-    chunk_number,
-    content,
-    summary,
-    metadata,
-    source_id,
-    1 - (archon_code_examples.embedding <=> query_embedding) AS similarity
-  FROM archon_code_examples
-  WHERE metadata @> filter
-    AND (source_filter IS NULL OR source_id = source_filter)
-  ORDER BY archon_code_examples.embedding <=> query_embedding
-  LIMIT match_count;
+  -- Search using 768-dimension embeddings
+  IF query_embedding_768 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, summary, metadata, source_id,
+      1 - (archon_code_examples.embedding_768 <=> query_embedding_768) AS similarity
+    FROM archon_code_examples
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_768 IS NOT NULL
+    ORDER BY archon_code_examples.embedding_768 <=> query_embedding_768
+    LIMIT match_count;
+  -- Search using 1024-dimension embeddings
+  ELSIF query_embedding_1024 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, summary, metadata, source_id,
+      1 - (archon_code_examples.embedding_1024 <=> query_embedding_1024) AS similarity
+    FROM archon_code_examples
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_1024 IS NOT NULL
+    ORDER BY archon_code_examples.embedding_1024 <=> query_embedding_1024
+    LIMIT match_count;
+  -- Search using 1536-dimension embeddings
+  ELSIF query_embedding_1536 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, summary, metadata, source_id,
+      1 - (archon_code_examples.embedding_1536 <=> query_embedding_1536) AS similarity
+    FROM archon_code_examples
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_1536 IS NOT NULL
+    ORDER BY archon_code_examples.embedding_1536 <=> query_embedding_1536
+    LIMIT match_count;
+  -- Search using 3072-dimension embeddings
+  ELSIF query_embedding_3072 IS NOT NULL THEN
+    RETURN QUERY
+    SELECT
+      id, url, chunk_number, content, summary, metadata, source_id,
+      1 - (archon_code_examples.embedding_3072 <=> query_embedding_3072) AS similarity
+    FROM archon_code_examples
+    WHERE metadata @> filter
+      AND (source_filter IS NULL OR source_id = source_filter)
+      AND embedding_3072 IS NOT NULL
+    ORDER BY archon_code_examples.embedding_3072 <=> query_embedding_3072
+    LIMIT match_count;
+  -- No query embedding provided
+  ELSE
+    RAISE EXCEPTION 'No query embedding provided';
+  END IF;
 END;
 $$;
 
