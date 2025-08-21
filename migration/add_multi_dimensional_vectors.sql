@@ -12,14 +12,18 @@ ALTER TABLE archon_crawled_pages
 ADD COLUMN IF NOT EXISTS embedding_768 VECTOR(768),
 ADD COLUMN IF NOT EXISTS embedding_1024 VECTOR(1024),
 ADD COLUMN IF NOT EXISTS embedding_1536 VECTOR(1536),
-ADD COLUMN IF NOT EXISTS embedding_3072 VECTOR(3072);
+ADD COLUMN IF NOT EXISTS embedding_3072 VECTOR(3072),
+ADD COLUMN IF NOT EXISTS embedding_model TEXT,
+ADD COLUMN IF NOT EXISTS embedding_dimensions INTEGER;
 
 -- Add multi-dimensional columns to archon_code_examples  
 ALTER TABLE archon_code_examples
 ADD COLUMN IF NOT EXISTS embedding_768 VECTOR(768),
 ADD COLUMN IF NOT EXISTS embedding_1024 VECTOR(1024),
 ADD COLUMN IF NOT EXISTS embedding_1536 VECTOR(1536),
-ADD COLUMN IF NOT EXISTS embedding_3072 VECTOR(3072);
+ADD COLUMN IF NOT EXISTS embedding_3072 VECTOR(3072),
+ADD COLUMN IF NOT EXISTS embedding_model TEXT,
+ADD COLUMN IF NOT EXISTS embedding_dimensions INTEGER;
 
 -- Create indexes for each dimension on archon_crawled_pages
 CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_768 
@@ -82,6 +86,12 @@ BEGIN
     END CASE;
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
+
+-- Add comments for new embedding tracking columns
+COMMENT ON COLUMN archon_crawled_pages.embedding_model IS 'The embedding model used to generate the embedding (e.g., text-embedding-3-small, all-mpnet-base-v2)';
+COMMENT ON COLUMN archon_crawled_pages.embedding_dimensions IS 'The number of dimensions in the stored embedding vector';
+COMMENT ON COLUMN archon_code_examples.embedding_model IS 'The embedding model used to generate the embedding (e.g., text-embedding-3-small, all-mpnet-base-v2)';
+COMMENT ON COLUMN archon_code_examples.embedding_dimensions IS 'The number of dimensions in the stored embedding vector';
 
 COMMIT;
 

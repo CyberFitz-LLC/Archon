@@ -195,11 +195,12 @@ CREATE TABLE IF NOT EXISTS archon_crawled_pages (
     content TEXT NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_id TEXT NOT NULL,
-    embedding VECTOR(1536),  -- OpenAI embeddings are 1536 dimensions
-    embedding_768 VECTOR(768),  -- For models like BGE, MiniLM
-    embedding_1024 VECTOR(1024),  -- For models like Cohere
-    embedding_1536 VECTOR(1536),  -- For OpenAI models
-    embedding_3072 VECTOR(3072),  -- For large models like text-embedding-3-large
+    embedding_768 VECTOR(768),   -- For text-embedding-3-small with reduced dimensions
+    embedding_1024 VECTOR(1024), -- For custom models requiring 1024 dimensions
+    embedding_1536 VECTOR(1536), -- For text-embedding-3-small (default) and text-embedding-ada-002
+    embedding_3072 VECTOR(3072), -- For text-embedding-3-large high-dimension embeddings
+    embedding_model TEXT,        -- The embedding model used (e.g., text-embedding-3-small)
+    embedding_dimensions INTEGER, -- The number of dimensions in the stored embedding vector
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
 
     -- Add a unique constraint to prevent duplicate chunks for the same URL
@@ -210,7 +211,6 @@ CREATE TABLE IF NOT EXISTS archon_crawled_pages (
 );
 
 -- Create indexes for better performance
-CREATE INDEX ON archon_crawled_pages USING ivfflat (embedding vector_cosine_ops);
 CREATE INDEX idx_archon_crawled_pages_metadata ON archon_crawled_pages USING GIN (metadata);
 CREATE INDEX idx_archon_crawled_pages_source_id ON archon_crawled_pages (source_id);
 
@@ -223,6 +223,10 @@ CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1536
 ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops) WITH (lists = 100);
 -- Note: 3072 dimensions exceed index limits, using sequential scan for this dimension
 
+-- Add comments for new embedding tracking columns
+COMMENT ON COLUMN archon_crawled_pages.embedding_model IS 'The embedding model used to generate the embedding (e.g., text-embedding-3-small, all-mpnet-base-v2)';
+COMMENT ON COLUMN archon_crawled_pages.embedding_dimensions IS 'The number of dimensions in the stored embedding vector';
+
 -- Create the code_examples table
 CREATE TABLE IF NOT EXISTS archon_code_examples (
     id BIGSERIAL PRIMARY KEY,
@@ -232,11 +236,12 @@ CREATE TABLE IF NOT EXISTS archon_code_examples (
     summary TEXT NOT NULL,  -- Summary of the code example
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_id TEXT NOT NULL,
-    embedding VECTOR(1536),  -- OpenAI embeddings are 1536 dimensions
-    embedding_768 VECTOR(768),  -- For models like BGE, MiniLM
-    embedding_1024 VECTOR(1024),  -- For models like Cohere
-    embedding_1536 VECTOR(1536),  -- For OpenAI models
-    embedding_3072 VECTOR(3072),  -- For large models like text-embedding-3-large
+    embedding_768 VECTOR(768),   -- For text-embedding-3-small with reduced dimensions
+    embedding_1024 VECTOR(1024), -- For custom models requiring 1024 dimensions
+    embedding_1536 VECTOR(1536), -- For text-embedding-3-small (default) and text-embedding-ada-002
+    embedding_3072 VECTOR(3072), -- For text-embedding-3-large high-dimension embeddings
+    embedding_model TEXT,        -- The embedding model used (e.g., text-embedding-3-small)
+    embedding_dimensions INTEGER, -- The number of dimensions in the stored embedding vector
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
 
     -- Add a unique constraint to prevent duplicate chunks for the same URL
@@ -247,7 +252,6 @@ CREATE TABLE IF NOT EXISTS archon_code_examples (
 );
 
 -- Create indexes for better performance
-CREATE INDEX ON archon_code_examples USING ivfflat (embedding vector_cosine_ops);
 CREATE INDEX idx_archon_code_examples_metadata ON archon_code_examples USING GIN (metadata);
 CREATE INDEX idx_archon_code_examples_source_id ON archon_code_examples (source_id);
 
@@ -259,6 +263,10 @@ ON archon_code_examples USING ivfflat (embedding_1024 vector_cosine_ops) WITH (l
 CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1536 
 ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops) WITH (lists = 100);
 -- Note: 3072 dimensions exceed index limits, using sequential scan for this dimension
+
+-- Add comments for new embedding tracking columns
+COMMENT ON COLUMN archon_code_examples.embedding_model IS 'The embedding model used to generate the embedding (e.g., text-embedding-3-small, all-mpnet-base-v2)';
+COMMENT ON COLUMN archon_code_examples.embedding_dimensions IS 'The number of dimensions in the stored embedding vector';
 
 -- =====================================================
 -- SECTION 5: SEARCH FUNCTIONS
