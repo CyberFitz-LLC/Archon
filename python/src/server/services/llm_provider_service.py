@@ -109,10 +109,13 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
                 )
             
             # Ensure base_url has /v1 suffix for OpenAI client compatibility
+            logger.debug(f"Ollama base_url before /v1 handling: {base_url}")
             if not base_url.endswith("/v1"):
                 clean_base_url = f"{base_url}/v1"
+                logger.info(f"Added /v1 suffix to Ollama base URL: {base_url} -> {clean_base_url}")
             else:
                 clean_base_url = base_url
+                logger.debug(f"Ollama base URL already has /v1 suffix: {clean_base_url}")
             
             # Ollama requires an API key in the client but doesn't actually use it
             client = openai.AsyncOpenAI(
