@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bug, X, Send, Copy, ExternalLink, Loader } from "lucide-react";
+import { Bug, X, Send, Copy, ExternalLink, Loader, Check } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Card } from "../ui/Card";
@@ -11,6 +11,7 @@ import {
   BugContext,
   BugReportData,
 } from "../../services/bugReportService";
+import { copyToClipboard } from "../../utils/clipboard";
 
 interface BugReportModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
 
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [copied, setCopied] = useState(false);
   const { showToast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -99,7 +101,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
         // Fallback: copy to clipboard
         const formattedReport =
           bugReportService.formatReportForClipboard(bugReportData);
-        await navigator.clipboard.writeText(formattedReport);
+        await copyToClipboard(formattedReport);
 
         showToast(
           "Failed to create GitHub issue, but bug report was copied to clipboard. Please paste it in a new GitHub issue.",
@@ -118,16 +120,21 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
     }
   };
 
-  const copyToClipboard = async () => {
+  const handleCopyToClipboard = async () => {
     const bugReportData: BugReportData = { ...report, context };
     const formattedReport =
       bugReportService.formatReportForClipboard(bugReportData);
 
-    try {
-      await navigator.clipboard.writeText(formattedReport);
+    const result = await copyToClipboard(formattedReport);
+    if (result.success) {
       showToast("Bug report copied to clipboard", "success");
-    } catch {
-      showToast("Failed to copy to clipboard", "error");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      showToast(
+        `Failed to copy: ${result.error || "Unknown error"}`,
+        "error"
+      );
     }
   };
 
@@ -372,11 +379,15 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={copyToClipboard}
+                    onClick={handleCopyToClipboard}
                     className="sm:order-1"
                   >
-                    <Copy className="w-4 h-4 mr-2" />
-                    Copy to Clipboard
+                    {copied ? (
+                      <Check className="w-4 h-4 mr-2" />
+                    ) : (
+                      <Copy className="w-4 h-4 mr-2" />
+                    )}
+                    {copied ? "Copied!" : "Copy to Clipboard"}
                   </Button>
 
                   <Button
