@@ -412,8 +412,13 @@ class CredentialService:
             # Get API key for this provider
             api_key = await self._get_provider_api_key(provider)
 
-            # Get base URL if needed
-            base_url = self._get_provider_base_url(provider, rag_settings)
+            # Get base URL based on service type
+            if service_type == "embedding" and provider == "ollama":
+                # Use EMBEDDING_BASE_URL for embedding services when using Ollama
+                base_url = rag_settings.get("EMBEDDING_BASE_URL", None)
+            else:
+                # Use LLM_BASE_URL for LLM services or standard base URL
+                base_url = self._get_provider_base_url(provider, rag_settings)
 
             # Get models
             chat_model = rag_settings.get("MODEL_CHOICE", "")

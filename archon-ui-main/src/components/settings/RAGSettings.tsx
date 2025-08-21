@@ -18,6 +18,7 @@ interface RAGSettingsProps {
     LLM_PROVIDER?: string;
     LLM_BASE_URL?: string;
     EMBEDDING_MODEL?: string;
+    EMBEDDING_BASE_URL?: string;
     // Crawling Performance Settings
     CRAWL_BATCH_SIZE?: number;
     CRAWL_MAX_CONCURRENT?: number;
@@ -72,18 +73,44 @@ export const RAGSettings = ({
             />
           </div>
           {ragSettings.LLM_PROVIDER === 'ollama' && (
-            <div>
-              <Input
-                label="Ollama Base URL"
-                value={ragSettings.LLM_BASE_URL || ''}
-                onChange={e => setRagSettings({
-                  ...ragSettings,
-                  LLM_BASE_URL: e.target.value
-                })}
-                placeholder="http://localhost:11434/v1"
-                accentColor="green"
-              />
-            </div>
+            <>
+              <div>
+                <Input
+                  label="Ollama LLM Base URL"
+                  value={ragSettings.LLM_BASE_URL || ''}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    LLM_BASE_URL: e.target.value
+                  })}
+                  placeholder="http://localhost:11434/v1"
+                  accentColor="green"
+                />
+              </div>
+              <div>
+                <Input
+                  label="Ollama Embedding Base URL"
+                  value={ragSettings.EMBEDDING_BASE_URL || ''}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    EMBEDDING_BASE_URL: e.target.value
+                  })}
+                  placeholder="http://localhost:11434/v1"
+                  accentColor="green"
+                />
+              </div>
+              <div>
+                <Input
+                  label="Embedding Model"
+                  value={ragSettings.EMBEDDING_MODEL || ''}
+                  onChange={e => setRagSettings({
+                    ...ragSettings,
+                    EMBEDDING_MODEL: e.target.value
+                  })}
+                  placeholder="e.g., nomic-embed-text, mxbai-embed-large"
+                  accentColor="green"
+                />
+              </div>
+            </>
           )}
           <div className="flex items-end">
             <Button 

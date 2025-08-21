@@ -20,6 +20,7 @@ export interface RagSettings {
   LLM_PROVIDER?: string;
   LLM_BASE_URL?: string;
   EMBEDDING_MODEL?: string;
+  EMBEDDING_BASE_URL?: string;
   // Crawling Performance Settings
   CRAWL_BATCH_SIZE?: number;
   CRAWL_MAX_CONCURRENT?: number;
@@ -153,6 +154,7 @@ class CredentialsService {
       LLM_PROVIDER: "openai",
       LLM_BASE_URL: "",
       EMBEDDING_MODEL: "",
+      EMBEDDING_BASE_URL: "",
       // Crawling Performance Settings defaults
       CRAWL_BATCH_SIZE: 50,
       CRAWL_MAX_CONCURRENT: 10,
@@ -181,6 +183,7 @@ class CredentialsService {
             "LLM_PROVIDER",
             "LLM_BASE_URL",
             "EMBEDDING_MODEL",
+            "EMBEDDING_BASE_URL",
             "CRAWL_WAIT_STRATEGY",
           ].includes(cred.key)
         ) {
