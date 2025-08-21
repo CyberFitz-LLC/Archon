@@ -1,0 +1,91 @@
+From b37e6feb0443fb84d0037a75a405472d3549f1ce Mon Sep 17 00:00:00 2001
+From: John Fitzpatrick <john@cyberfitz.org>
+Date: Sat, 9 Aug 2025 23:46:06 -0700
+Subject: [PATCH 03/38] Fix pgvector ivfflat index limitation for
+ 3072-dimension vectors
+
+- Comment out ivfflat indexes for embedding_3072 columns
+- pgvector ivfflat indexes have a 2000-dimension limit
+- 3072-dimension vectors will use sequential scan which is still performant
+- Added notes about using HNSW index type when available in future pgvector versions
+- Fixed in both complete_setup.sql and upgrade_multi_dimensional_vectors.sql
+---
+ migration/complete_setup.sql                   | 18 ++++++++++++------
+ .../upgrade_multi_dimensional_vectors.sql      | 18 ++++++++++++------
+ 2 files changed, 24 insertions(+), 12 deletions(-)
+
+diff --git a/migration/complete_setup.sql b/migration/complete_setup.sql
+index ec3f2bb..80d9404 100644
+--- a/migration/complete_setup.sql
++++ b/migration/complete_setup.sql
+@@ -227,9 +227,12 @@ CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1536
+ ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops)
+ WITH (lists = 1000);
+ 
+-CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_3072
+-ON archon_crawled_pages USING ivfflat (embedding_3072 vector_cosine_ops)
+-WITH (lists = 1000);
++-- NOTE: pgvector ivfflat indexes do not support vectors with more than 2000 dimensions
++-- For 3072-dimension vectors, we'll use sequential scan which is still performant for most use cases
++-- If index is needed in future, consider using HNSW index type when available in pgvector
++-- CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_3072
++-- ON archon_crawled_pages USING ivfflat (embedding_3072 vector_cosine_ops)
++-- WITH (lists = 1000);
+ 
+ -- Create the code_examples table
+ CREATE TABLE IF NOT EXISTS archon_code_examples (
+@@ -272,9 +275,12 @@ CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1536
+ ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops)
+ WITH (lists = 1000);
+ 
+-CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_3072
+-ON archon_code_examples USING ivfflat (embedding_3072 vector_cosine_ops)
+-WITH (lists = 1000);
++-- NOTE: pgvector ivfflat indexes do not support vectors with more than 2000 dimensions
++-- For 3072-dimension vectors, we'll use sequential scan which is still performant for most use cases
++-- If index is needed in future, consider using HNSW index type when available in pgvector
++-- CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_3072
++-- ON archon_code_examples USING ivfflat (embedding_3072 vector_cosine_ops)
++-- WITH (lists = 1000);
+ 
+ -- =====================================================
+ -- SECTION 5: SEARCH FUNCTIONS
+diff --git a/migration/upgrade_multi_dimensional_vectors.sql b/migration/upgrade_multi_dimensional_vectors.sql
+index fda8674..9a7633e 100644
+--- a/migration/upgrade_multi_dimensional_vectors.sql
++++ b/migration/upgrade_multi_dimensional_vectors.sql
+@@ -93,9 +93,12 @@ BEGIN
+     ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops)
+     WITH (lists = 1000);
+     
+-    CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_3072
+-    ON archon_crawled_pages USING ivfflat (embedding_3072 vector_cosine_ops)
+-    WITH (lists = 1000);
++    -- NOTE: pgvector ivfflat indexes do not support vectors with more than 2000 dimensions
++    -- For 3072-dimension vectors, we'll use sequential scan which is still performant for most use cases
++    -- If index is needed in future, consider using HNSW index type when available in pgvector
++    -- CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_3072
++    -- ON archon_crawled_pages USING ivfflat (embedding_3072 vector_cosine_ops)
++    -- WITH (lists = 1000);
+     
+     -- Indexes for archon_code_examples multi-dimensional embeddings
+     CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_768
+@@ -110,9 +113,12 @@ BEGIN
+     ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops)
+     WITH (lists = 1000);
+     
+-    CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_3072
+-    ON archon_code_examples USING ivfflat (embedding_3072 vector_cosine_ops)
+-    WITH (lists = 1000);
++    -- NOTE: pgvector ivfflat indexes do not support vectors with more than 2000 dimensions
++    -- For 3072-dimension vectors, we'll use sequential scan which is still performant for most use cases
++    -- If index is needed in future, consider using HNSW index type when available in pgvector
++    -- CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_3072
++    -- ON archon_code_examples USING ivfflat (embedding_3072 vector_cosine_ops)
++    -- WITH (lists = 1000);
+     
+     RAISE NOTICE 'Vector indexes created successfully.';
+     
+-- 
+2.39.5
+
