@@ -16,8 +16,48 @@ from urllib.parse import urlparse
 from supabase import Client
 
 from ...config.logfire_config import search_logger
+from ..embeddings.embedding_service import create_embeddings_batch, create_embedding, get_dimension_column_name
 from ..embeddings.contextual_embedding_service import generate_contextual_embeddings_batch
-from ..embeddings.embedding_service import create_embeddings_batch
+from ..llm_provider_service import get_llm_client
+# Removed import: from ..source_management_service import update_source_info
+
+
+def extract_source_id_from_url(url: str) -> str:
+    """
+    Extract a meaningful source_id from a URL.
+    
+    For GitHub URLs, includes the repository path (e.g., github.com/user/repo.git).
+    For other URLs, uses the domain.
+    
+    Args:
+        url: The URL to extract source_id from
+        
+    Returns:
+        str: The extracted source_id
+    """
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc or parsed_url.path
+    
+    # Special handling for GitHub URLs to include repository path
+    if domain == "github.com" and parsed_url.path:
+        # Extract user/repo from path like /user/repo/blob/main/file.py
+        path_parts = [part for part in parsed_url.path.split('/') if part]
+        if len(path_parts) >= 2:
+            # Check if the second part ends with .git
+            repo_part = path_parts[1]
+            if repo_part.endswith('.git'):
+                # Include github.com/user/repo.git (preserve .git suffix)
+                return f"github.com/{path_parts[0]}/{repo_part}"
+            else:
+                # Check if this might be from a git clone URL by looking for .git in original URL
+                if '.git' in url:
+                    # Add .git suffix to match source records created during crawl
+                    return f"github.com/{path_parts[0]}/{repo_part}.git"
+                else:
+                    # Standard GitHub URL without .git
+                    return f"github.com/{path_parts[0]}/{repo_part}"
+    
+    return domain
 
 
 def _get_model_choice() -> str:
@@ -30,6 +70,9 @@ def _get_model_choice() -> str:
             model = credential_service._cache["MODEL_CHOICE"]
         else:
             model = os.getenv("MODEL_CHOICE", "gpt-4.1-nano")
+        
+        # Strip whitespace to fix issues with trailing spaces in model names
+        model = model.strip() if model else "gpt-4.1-nano"
         search_logger.debug(f"Using model choice: {model}")
         return model
     except Exception as e:
@@ -489,7 +532,7 @@ def extract_code_blocks(markdown_content: str, min_length: int = None) -> list[d
     return grouped_blocks
 
 
-def generate_code_example_summary(
+async def generate_code_example_summary(
     code: str, context_before: str, context_after: str, language: str = "", provider: str = None
 ) -> dict[str, str]:
     """
@@ -535,82 +578,48 @@ Format your response as JSON:
 """
 
     try:
-        # Get LLM client using fallback
-        try:
-            import os
-
-            import openai
-
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                # Try to get from credential service with direct fallback
-                from ..credential_service import credential_service
-
-                if (
-                    credential_service._cache_initialized
-                    and "OPENAI_API_KEY" in credential_service._cache
-                ):
-                    cached_key = credential_service._cache["OPENAI_API_KEY"]
-                    if isinstance(cached_key, dict) and cached_key.get("is_encrypted"):
-                        api_key = credential_service._decrypt_value(cached_key["encrypted_value"])
-                    else:
-                        api_key = cached_key
-                else:
-                    api_key = os.getenv("OPENAI_API_KEY", "")
-
-            if not api_key:
-                raise ValueError("No OpenAI API key available")
-
-            client = openai.OpenAI(api_key=api_key)
-        except Exception as e:
-            search_logger.error(
-                f"Failed to create LLM client fallback: {e} - returning default values"
+        # Use the LLM provider service instead of hardcoded OpenAI
+        async with get_llm_client(provider=provider) as client:
+            search_logger.debug(
+                f"Calling LLM API with model: {model_choice}, language: {language}, code length: {len(code)}"
             )
-            return {
-                "example_name": f"Code Example{f' ({language})' if language else ''}",
-                "summary": "Code example for demonstration purposes.",
+
+            response = await client.chat.completions.create(
+                model=model_choice,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that analyzes code examples and provides JSON responses with example names and summaries.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
+
+            response_content = response.choices[0].message.content.strip()
+            search_logger.debug(f"LLM API response: {repr(response_content[:200])}...")
+
+            result = json.loads(response_content)
+
+            # Validate the response has the required fields
+            if not result.get("example_name") or not result.get("summary"):
+                search_logger.warning(f"Incomplete response from LLM: {result}")
+
+            final_result = {
+                "example_name": result.get(
+                    "example_name", f"Code Example{f' ({language})' if language else ''}"
+                ),
+                "summary": result.get("summary", "Code example for demonstration purposes."),
             }
 
-        search_logger.debug(
-            f"Calling OpenAI API with model: {model_choice}, language: {language}, code length: {len(code)}"
-        )
-
-        response = client.chat.completions.create(
-            model=model_choice,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant that analyzes code examples and provides JSON responses with example names and summaries.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-        )
-
-        response_content = response.choices[0].message.content.strip()
-        search_logger.debug(f"OpenAI API response: {repr(response_content[:200])}...")
-
-        result = json.loads(response_content)
-
-        # Validate the response has the required fields
-        if not result.get("example_name") or not result.get("summary"):
-            search_logger.warning(f"Incomplete response from OpenAI: {result}")
-
-        final_result = {
-            "example_name": result.get(
-                "example_name", f"Code Example{f' ({language})' if language else ''}"
-            ),
-            "summary": result.get("summary", "Code example for demonstration purposes."),
-        }
-
-        search_logger.info(
-            f"Generated code example summary - Name: '{final_result['example_name']}', Summary length: {len(final_result['summary'])}"
-        )
-        return final_result
+            search_logger.info(
+                f"Generated code example summary - Name: '{final_result['example_name']}', Summary length: {len(final_result['summary'])}"
+            )
+            return final_result
 
     except json.JSONDecodeError as e:
         search_logger.error(
-            f"Failed to parse JSON response from OpenAI: {e}, Response: {repr(response_content) if 'response_content' in locals() else 'No response'}"
+            f"Failed to parse JSON response from LLM: {e}, Response: {repr(response_content) if 'response_content' in locals() else 'No response'}"
         )
         return {
             "example_name": f"Code Example{f' ({language})' if language else ''}",
@@ -671,11 +680,8 @@ async def generate_code_summaries_batch(
             # Add delay between requests to avoid rate limiting
             await asyncio.sleep(0.5)  # 500ms delay between requests
 
-            # Run the synchronous function in a thread
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                generate_code_example_summary,
+            # Call the now-async function directly
+            result = await generate_code_example_summary(
                 block["code"],
                 block["context_before"],
                 block["context_after"],
@@ -890,9 +896,17 @@ async def add_code_examples_to_supabase(
             if metadatas[idx] and "source_id" in metadatas[idx]:
                 source_id = metadatas[idx]["source_id"]
             else:
-                parsed_url = urlparse(urls[idx])
-                source_id = parsed_url.netloc or parsed_url.path
-
+                source_id = extract_source_id_from_url(urls[idx])
+            
+            # Get appropriate embedding column name based on dimensions
+            try:
+                embedding_dims = len(embedding)
+                column_name = get_dimension_column_name(embedding_dims)
+            except Exception as e:
+                search_logger.error(f"Failed to determine embedding column for {len(embedding) if embedding else 'None'} dimensions: {e}")
+                # Fallback to default 1536-dimensional column
+                column_name = "embedding_1536"
+            
             batch_data.append({
                 "url": urls[idx],
                 "chunk_number": chunk_numbers[idx],
@@ -900,8 +914,20 @@ async def add_code_examples_to_supabase(
                 "summary": summaries[idx],
                 "metadata": metadatas[idx],  # Store as JSON object, not string
                 "source_id": source_id,
-                "embedding": embedding,
+                column_name: embedding,
+                "embedding_model": result.embedding_model,  # Track which model was used
+                "embedding_dimensions": result.embedding_dimensions  # Track dimension size
             })
+
+        # FOREIGN KEY FIX: Ensure all source records exist before inserting code examples
+        unique_source_ids = set()
+        for record in batch_data:
+            if record.get("source_id"):
+                unique_source_ids.add(record["source_id"])
+        
+        if unique_source_ids:
+            search_logger.info(f"Ensuring {len(unique_source_ids)} source records exist: {list(unique_source_ids)}")
+            await _ensure_source_records_exist(client, unique_source_ids)
 
         # Insert batch into Supabase with retry logic
         max_retries = 3
@@ -967,3 +993,68 @@ async def add_code_examples_to_supabase(
             "log": f"Code storage completed. Stored {total_items} code examples.",
             "total_items": total_items,
         })
+
+
+async def _ensure_source_records_exist(client: Client, source_ids: set[str]) -> None:
+    """
+    Ensure all source records exist in the database before inserting code examples.
+    
+    This prevents foreign key constraint violations when storing code examples
+    that reference source_ids extracted from individual URLs.
+    
+    Args:
+        client: Supabase client
+        source_ids: Set of source_id values that need to exist
+    """
+    if not source_ids:
+        return
+        
+    try:
+        # Check which source_ids already exist
+        existing_result = client.table("archon_sources").select("source_id").in_("source_id", list(source_ids)).execute()
+        existing_source_ids = {row["source_id"] for row in existing_result.data} if existing_result.data else set()
+        
+        # Find missing source_ids
+        missing_source_ids = source_ids - existing_source_ids
+        
+        if missing_source_ids:
+            search_logger.info(f"Creating {len(missing_source_ids)} missing source records: {list(missing_source_ids)}")
+            
+            # Create missing source records using direct table insert (simpler and more reliable)
+            for source_id in missing_source_ids:
+                try:
+                    # Generate a simple summary based on source_id
+                    if "github.com" in source_id:
+                        title = f"GitHub Repository: {source_id}"
+                        summary = f"Code examples extracted from GitHub repository {source_id}"
+                    else:
+                        title = f"Code Examples from {source_id}"
+                        summary = f"Code examples extracted from {source_id}"
+                    
+                    # Create the source record with minimal required data using direct insert
+                    # This avoids any issues with the update_source_info function
+                    client.table('archon_sources').upsert({
+                        'source_id': source_id,
+                        'title': title,
+                        'summary': summary,
+                        'total_word_count': 0,  # Will be updated when documents are processed
+                        'metadata': {
+                            'knowledge_type': 'technical',
+                            'tags': [],
+                            'auto_generated': True,
+                            'created_for_code_examples': True,
+                            'original_url': f"https://{source_id}" if not source_id.startswith("http") else source_id
+                        }
+                    }).execute()
+                    search_logger.info(f"✅ Created missing source record for '{source_id}'")
+                    
+                except Exception as e:
+                    search_logger.error(f"❌ Failed to create source record for '{source_id}': {e}")
+                    # Continue with other source_ids even if one fails
+                    
+        else:
+            search_logger.info(f"All {len(source_ids)} source records already exist")
+            
+    except Exception as e:
+        search_logger.error(f"Error checking/creating source records: {e}")
+        # Don't raise - let the code examples insert attempt and handle foreign key errors gracefully

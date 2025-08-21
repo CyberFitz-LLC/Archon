@@ -21,6 +21,14 @@ from .embedding_exceptions import (
     EmbeddingQuotaExhaustedError,
     EmbeddingRateLimitError,
 )
+from .dimension_validator import (
+    validate_embedding_dimensions, log_dimension_operation, 
+    ensure_valid_embedding, validate_batch_consistency
+)
+from .exceptions import (
+    EmbeddingCreationError, UnsupportedDimensionError, 
+    QuotaExhaustedError, RateLimitError, handle_dimension_error
+)
 
 
 @dataclass
@@ -32,6 +40,8 @@ class EmbeddingBatchResult:
     success_count: int = 0
     failure_count: int = 0
     texts_processed: list[str] = field(default_factory=list)  # Successfully processed texts
+    embedding_model: str | None = None  # The embedding model used
+    embedding_dimensions: int | None = None  # The dimension size of the embeddings
 
     def add_success(self, embedding: list[float], text: str):
         """Add a successful embedding."""
@@ -62,6 +72,73 @@ class EmbeddingBatchResult:
     @property
     def total_requested(self) -> int:
         return self.success_count + self.failure_count
+
+
+def get_embedding_dimensions(model_name: str) -> int:
+    """
+    Get the number of dimensions for a given embedding model.
+    
+    Args:
+        model_name: Name of the embedding model
+        
+    Returns:
+        Number of dimensions for the model
+    """
+    # Import the new dimension service 
+    from .embedding_dimension_service import embedding_dimension_service
+    
+    # Try to get dimensions from the new service first
+    try:
+        # Use the new dimension service which has comprehensive model support
+        dimensions = embedding_dimension_service._get_known_model_dimension(model_name)
+        if dimensions:
+            return dimensions
+    except Exception as e:
+        search_logger.warning(f"Failed to get dimensions from dimension service: {e}")
+    
+    # Fallback to legacy hardcoded dimensions for backward compatibility
+    # OpenAI models
+    if model_name in ['text-embedding-3-large']:
+        return 3072
+    elif model_name in ['text-embedding-3-small', 'text-embedding-ada-002']:
+        return 1536
+    # Sentence-transformers models (common dimensions)
+    elif 'all-MiniLM-L6-v2' in model_name:
+        return 384
+    elif 'all-mpnet-base-v2' in model_name:
+        return 768
+    elif 'all-MiniLM-L12-v2' in model_name:
+        return 384
+    # Ollama models - now handled by dimension service, but keep one for fallback
+    elif 'snowflake-arctic-embed2' in model_name:
+        return 1024  # Updated to correct dimension
+    # Default fallback
+    else:
+        search_logger.warning(f"Unknown model dimensions for {model_name}, defaulting to 1536")
+        return 1536
+
+
+def get_dimension_column_name(dimensions: int) -> str:
+    """
+    Get the appropriate database column name for given dimensions.
+    
+    Args:
+        dimensions: Number of embedding dimensions
+        
+    Returns:
+        Column name to use for storage
+    """
+    if dimensions == 768:
+        return "embedding_768"
+    elif dimensions == 1024:
+        return "embedding_1024"
+    elif dimensions == 1536:
+        return "embedding_1536"
+    elif dimensions == 3072:
+        return "embedding_3072"
+    else:
+        search_logger.warning(f"Unsupported dimensions {dimensions}, defaulting to embedding_1536")
+        return "embedding_1536"
 
 
 # Provider-aware client factory
@@ -126,6 +203,10 @@ async def create_embedding(text: str, provider: str | None = None) -> list[float
             raise EmbeddingAPIError(
                 f"Embedding error: {error_msg}", text_preview=text, original_error=e
             )
+
+# Alias for backward compatibility with tests and other modules
+create_embedding_async = create_embedding
+
 
 
 async def create_embeddings_batch(
@@ -217,13 +298,30 @@ async def create_embeddings_batch(
                                     response = await client.embeddings.create(
                                         model=embedding_model,
                                         input=batch,
-                                        dimensions=embedding_dimensions,
+                                        dimensions=get_embedding_dimensions(embedding_model)
                                     )
-
+                                    
+                                    # Extract embeddings and validate consistency
+                                    batch_embeddings = [item.embedding for item in response.data]
+                                    
+                                    # Validate embedding dimensions
+                                    embedding_model_dims = get_embedding_dimensions(embedding_model)
+                                    is_consistent, consistency_msg = validate_batch_consistency(batch_embeddings)
+                                    
+                                    if not is_consistent:
+                                        search_logger.warning(f"Batch consistency validation failed: {consistency_msg}")
+                                        log_dimension_operation("embedding_creation", embedding_model_dims, False, consistency_msg)
+                                    else:
+                                        log_dimension_operation("embedding_creation", embedding_model_dims, True)
+                                    
+                                    # Set model info on first successful batch (all batches use same model)
+                                    if result.embedding_model is None:
+                                        result.embedding_model = embedding_model
+                                        result.embedding_dimensions = embedding_model_dims
+                                    
                                     # Add successful embeddings
-                                    for text, item in zip(batch, response.data, strict=False):
-                                        result.add_success(item.embedding, text)
-
+                                    for text, embedding in zip(batch, batch_embeddings):
+                                        result.add_success(embedding, text)
                                     break  # Success, exit retry loop
 
                                 except openai.RateLimitError as e:

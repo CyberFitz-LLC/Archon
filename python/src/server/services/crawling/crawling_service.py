@@ -14,6 +14,45 @@ from urllib.parse import urlparse
 from ...config.logfire_config import safe_logfire_info, safe_logfire_error, get_logger
 from ...utils import get_supabase_client
 
+
+def extract_source_id_from_url(url: str) -> str:
+    """
+    Extract a meaningful source_id from a URL.
+    
+    For GitHub URLs, includes the repository path (e.g., github.com/user/repo.git).
+    For other URLs, uses the domain.
+    
+    Args:
+        url: The URL to extract source_id from
+        
+    Returns:
+        str: The extracted source_id
+    """
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc or parsed_url.path
+    
+    # Special handling for GitHub URLs to include repository path
+    if domain == "github.com" and parsed_url.path:
+        # Extract user/repo from path like /user/repo/blob/main/file.py
+        path_parts = [part for part in parsed_url.path.split('/') if part]
+        if len(path_parts) >= 2:
+            # Check if the second part ends with .git
+            repo_part = path_parts[1]
+            if repo_part.endswith('.git'):
+                # Include github.com/user/repo.git (preserve .git suffix)
+                return f"github.com/{path_parts[0]}/{repo_part}"
+            else:
+                # Check if this might be from a git clone URL by looking for .git in original URL
+                if '.git' in url:
+                    # Add .git suffix to match source records created during crawl
+                    return f"github.com/{path_parts[0]}/{repo_part}.git"
+                else:
+                    # Standard GitHub URL without .git
+                    return f"github.com/{path_parts[0]}/{repo_part}"
+    
+    return domain
+
+
 # Lazy import socket.IO handlers to avoid circular dependencies
 # These are imported as module-level variables but resolved at runtime
 update_crawl_progress = None
@@ -46,6 +85,9 @@ from .helpers.site_config import SiteConfig
 # Import operations
 from .document_storage_operations import DocumentStorageOperations
 from .progress_mapper import ProgressMapper
+
+# Import keep-alive manager
+from ..model_keepalive_service import get_keep_alive_manager
 
 logger = get_logger(__name__)
 
