@@ -196,6 +196,10 @@ CREATE TABLE IF NOT EXISTS archon_crawled_pages (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_id TEXT NOT NULL,
     embedding VECTOR(1536),  -- OpenAI embeddings are 1536 dimensions
+    embedding_768 VECTOR(768),  -- For models like BGE, MiniLM
+    embedding_1024 VECTOR(1024),  -- For models like Cohere
+    embedding_1536 VECTOR(1536),  -- For OpenAI models
+    embedding_3072 VECTOR(3072),  -- For large models like text-embedding-3-large
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
 
     -- Add a unique constraint to prevent duplicate chunks for the same URL
@@ -210,6 +214,15 @@ CREATE INDEX ON archon_crawled_pages USING ivfflat (embedding vector_cosine_ops)
 CREATE INDEX idx_archon_crawled_pages_metadata ON archon_crawled_pages USING GIN (metadata);
 CREATE INDEX idx_archon_crawled_pages_source_id ON archon_crawled_pages (source_id);
 
+-- Create indexes for multi-dimensional vectors on archon_crawled_pages
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_768 
+ON archon_crawled_pages USING ivfflat (embedding_768 vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1024 
+ON archon_crawled_pages USING ivfflat (embedding_1024 vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1536 
+ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops) WITH (lists = 100);
+-- Note: 3072 dimensions exceed index limits, using sequential scan for this dimension
+
 -- Create the code_examples table
 CREATE TABLE IF NOT EXISTS archon_code_examples (
     id BIGSERIAL PRIMARY KEY,
@@ -220,6 +233,10 @@ CREATE TABLE IF NOT EXISTS archon_code_examples (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_id TEXT NOT NULL,
     embedding VECTOR(1536),  -- OpenAI embeddings are 1536 dimensions
+    embedding_768 VECTOR(768),  -- For models like BGE, MiniLM
+    embedding_1024 VECTOR(1024),  -- For models like Cohere
+    embedding_1536 VECTOR(1536),  -- For OpenAI models
+    embedding_3072 VECTOR(3072),  -- For large models like text-embedding-3-large
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
 
     -- Add a unique constraint to prevent duplicate chunks for the same URL
@@ -233,6 +250,15 @@ CREATE TABLE IF NOT EXISTS archon_code_examples (
 CREATE INDEX ON archon_code_examples USING ivfflat (embedding vector_cosine_ops);
 CREATE INDEX idx_archon_code_examples_metadata ON archon_code_examples USING GIN (metadata);
 CREATE INDEX idx_archon_code_examples_source_id ON archon_code_examples (source_id);
+
+-- Create indexes for multi-dimensional vectors on archon_code_examples
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_768 
+ON archon_code_examples USING ivfflat (embedding_768 vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1024 
+ON archon_code_examples USING ivfflat (embedding_1024 vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1536 
+ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops) WITH (lists = 100);
+-- Note: 3072 dimensions exceed index limits, using sequential scan for this dimension
 
 -- =====================================================
 -- SECTION 5: SEARCH FUNCTIONS

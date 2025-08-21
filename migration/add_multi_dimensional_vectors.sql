@@ -34,10 +34,12 @@ CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_1536
 ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops) 
 WITH (lists = 100);
 
--- Note: 3072 dimensions require special handling due to ivfflat limitations
--- We use a HNSW index instead for better performance with high dimensions
-CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_3072 
-ON archon_crawled_pages USING hnsw (embedding_3072 vector_cosine_ops);
+-- Note: 3072 dimensions exceed HNSW's 2000 dimension limit
+-- We skip the index for 3072 dimensions as sequential scan is acceptable
+-- for this use case. Future optimization could include dimension reduction
+-- or alternative indexing strategies.
+-- CREATE INDEX IF NOT EXISTS idx_archon_crawled_pages_embedding_3072 
+-- ON archon_crawled_pages USING hnsw (embedding_3072 vector_cosine_ops);
 
 -- Create indexes for each dimension on archon_code_examples
 CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_768 
@@ -52,9 +54,12 @@ CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_1536
 ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops) 
 WITH (lists = 100);
 
--- HNSW index for 3072 dimensions
-CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_3072 
-ON archon_code_examples USING hnsw (embedding_3072 vector_cosine_ops);
+-- Note: 3072 dimensions exceed HNSW's 2000 dimension limit
+-- We skip the index for 3072 dimensions as sequential scan is acceptable
+-- for this use case. Future optimization could include dimension reduction
+-- or alternative indexing strategies.
+-- CREATE INDEX IF NOT EXISTS idx_archon_code_examples_embedding_3072 
+-- ON archon_code_examples USING hnsw (embedding_3072 vector_cosine_ops);
 
 -- Add function to detect embedding dimension from vector
 CREATE OR REPLACE FUNCTION detect_embedding_dimension(embedding_vector vector)
