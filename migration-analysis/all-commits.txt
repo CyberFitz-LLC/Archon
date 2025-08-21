@@ -1,0 +1,38 @@
+89e275d9fb68517556a721d6a21406effc29085a|feat: enhance progress callback compatibility and finalize Ollama implementation|John Fitzpatrick|2025-08-16
+ce286d056fca0a59c9cf3e25aa3f2501ca86ee4a|refactor: Enhanced UI components and removed deprecated EmbeddingModelChanger|John Fitzpatrick|2025-08-16
+a3748a98dc7f0e9b84dc3a3bc26c5af91f310336|feat: Implement database persistence and intelligent load balancing for Ollama instances|John Fitzpatrick|2025-08-15
+023d8cacd2f265860ba63643385153975901a407|feat: finalize Ollama database persistence and load balancing implementation|John Fitzpatrick|2025-08-16
+280f67a343aeaecc29141bfe422231e8ab318d7f|refactor: Enhanced UI components and removed deprecated EmbeddingModelChanger|John Fitzpatrick|2025-08-16
+2bba90e72d6f1ae5df238dbab324d73c12ce99a3|feat: Implement database persistence and intelligent load balancing for Ollama instances|John Fitzpatrick|2025-08-15
+e425ac3b09b9c2da33f4512ad4db5b35ac1eb30f|fix: Connect ModelSelectionModal to configured Ollama instances|John Fitzpatrick|2025-08-15
+81c98c6d7f40d309dc30fc54f236c27c0c51b478|fix: Resolve settings persistence and infinite loop issues in UI|John Fitzpatrick|2025-08-15
+44cdebe79c4347cf299f6036bdeb629bad9db30e|revert: Restore original container names in docker-compose.yml|John Fitzpatrick|2025-08-15
+9d179619f4c184a3422597ae1d76661a677675c1|feat: Enhanced multi-provider settings UI with distributed Ollama processing|John Fitzpatrick|2025-08-15
+7257c0dac0e7838e0af6322e34bddcd7b8ebd392|fix: Critical crawl stability - resolve browser context issues and foreign key constraint violations|John Fitzpatrick|2025-08-15
+0fdbed73f4ed188ec364f3b5b3e54081a762c60b|feat: Comprehensive crawl performance optimization and enhanced error diagnostics|John Fitzpatrick|2025-08-14
+e57bb996ac80c6e4beffd7d16e375e3494783d13|fix: Critical crawling failures - import paths and credential service|John Fitzpatrick|2025-08-14
+00697b603ac721ab1e749eac0f2ce1645ca8bbb9|feat: Complete model keep-alive system and fix all API endpoint routing issues|John Fitzpatrick|2025-08-14
+bd8339bd556876d3c258727a4a9c4e00698191fc|feat: Add embedding model tracking and fix refresh endpoint routing|John Fitzpatrick|2025-08-13
+36d9466bf80e9a0f24eb184efbd8a2c9100289db|fix: Resolve source_id inconsistency and FastAPI routing issues|John Fitzpatrick|2025-08-13
+7f063f8b3604d00f48c21cc8c663cc44f9866c34|fix: Update CI workflow to use modern Docker Compose syntax|John Fitzpatrick|2025-08-13
+c54cd76211518bfb96809971ddd3ce197682fec3|fix: Resolve TruffleHog security scan configuration|John Fitzpatrick|2025-08-13
+89b52f70ee72cb46ec8bca33b77a5be87bb32ea8|fix: Update CI/CD workflows and Docker configurations|John Fitzpatrick|2025-08-13
+8da8eb7695338fdd0ab28222bf1ce7b5aa8a06e4|fix: Complete Ollama chat model integration|John Fitzpatrick|2025-08-13
+0fc583414787dd04966995fd198c2ffb3dcc351d|fix: Improve source_id extraction for GitHub repositories|John Fitzpatrick|2025-08-13
+447f4ece97d153efff8ab8ab398e308043b5c67f|Added .claude/agents to .gitignore|John Fitzpatrick|2025-08-12
+7d02b9dce0484cc83f0aa4c797311b5388958192|Fix embedding dimension service integration|John Fitzpatrick|2025-08-11
+d49c927e205025348909ea47f258776cec78b94e|fix: Update multi-dimensional vector test suite to pass validation|John Fitzpatrick|2025-08-11
+5e2c5a0ed83893962d0e6a20afcf809786623092|feat: Complete multi-dimensional vector system implementation|John Fitzpatrick|2025-08-10
+d690857fc69151748953a701b5a6188189489899|docs: Add comprehensive Ollama integration guide|John Fitzpatrick|2025-08-11
+f3840b754b429a41fe0b8163e0a034d0689549ed|feat: Add final validation and integration test scripts|John Fitzpatrick|2025-08-11
+9447e014f9c509e9651e21fbb63201c904e708a7|fix: Update multi-dimensional vector test suite to pass validation|John Fitzpatrick|2025-08-11
+f2c6d4f6fa13a3692eb3d06c387470dd7b934a64|feat: Complete multi-dimensional vector system implementation|John Fitzpatrick|2025-08-10
+976aeea6a718b0d8326c91f22aba4d5dc431f333|feat: Enable Ollama integration for local LLM support|John Fitzpatrick|2025-08-10
+292aa7303cb0a7fb56d5319836924c605c1f6dd1|Fix RESET_DB.sql to comprehensively clean up triggers and functions|John Fitzpatrick|2025-08-10
+7537242cb5e1b214f7e971bb94774bfce629de0b|Sync complete_setup.sql with corrected multi-parameter function implementations|John Fitzpatrick|2025-08-10
+d8db2f9706b4bf9cac221ca98f7365c4924ed744|Complete upgrade script with corrected multi-parameter function implementations|John Fitzpatrick|2025-08-10
+f1070746c43309021f2bd457abf1639da909d1d3|feat: unify search functions with dynamic multi-dimensional logic|John Fitzpatrick|2025-08-10
+95c6213644a2da7c188538cc528addb9a455305d|Simplify schema: Remove legacy embedding columns|John Fitzpatrick|2025-08-09
+b37e6feb0443fb84d0037a75a405472d3549f1ce|Fix pgvector ivfflat index limitation for 3072-dimension vectors|John Fitzpatrick|2025-08-09
+65fce8641a8021a5c21f8583db8f2ab7dabd4b9e|Add dimension detection functions to multi-dimensional vectors feature|John Fitzpatrick|2025-08-09
+166cacdc95ae75cbd2a022eaab431a581f2feec2|feat: add multi-dimensional vector columns to database schema|John Fitzpatrick|2025-08-09

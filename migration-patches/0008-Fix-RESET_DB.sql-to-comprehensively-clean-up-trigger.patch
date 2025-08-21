@@ -1,0 +1,126 @@
+From 292aa7303cb0a7fb56d5319836924c605c1f6dd1 Mon Sep 17 00:00:00 2001
+From: John Fitzpatrick <john@cyberfitz.org>
+Date: Sun, 10 Aug 2025 09:53:46 -0700
+Subject: [PATCH 08/38] Fix RESET_DB.sql to comprehensively clean up triggers
+ and functions
+
+- Replace static trigger drops with dynamic query that finds all triggers on archon_ and legacy tables
+- Replace static function drops with dynamic query that finds all custom functions in public schema
+- Add proper function signature handling for multi-dimensional vector search functions
+- This resolves the 'trigger already exists' error when running complete_setup.sql after reset
+- Ensures complete cleanup for reliable database reset and re-setup
+---
+ migration/RESET_DB.sql | 81 +++++++++++++++++++++++-------------------
+ 1 file changed, 44 insertions(+), 37 deletions(-)
+
+diff --git a/migration/RESET_DB.sql b/migration/RESET_DB.sql
+index 7b1fd04..aa2f4ad 100644
+--- a/migration/RESET_DB.sql
++++ b/migration/RESET_DB.sql
+@@ -93,29 +93,31 @@ END $$;
+ -- ======================================================================
+ 
+ DO $$
++DECLARE
++    trigger_record RECORD;
+ BEGIN
+-    RAISE NOTICE 'Dropping triggers...';
+-    
+-    -- Settings table triggers
+-    DROP TRIGGER IF EXISTS update_archon_settings_updated_at ON archon_settings;
+-    DROP TRIGGER IF EXISTS update_settings_updated_at ON settings;
+-    
+-    -- Projects table triggers
+-    DROP TRIGGER IF EXISTS update_archon_projects_updated_at ON archon_projects;
+-    DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
++    RAISE NOTICE 'Dropping all triggers on Archon tables...';
+     
+-    -- Tasks table triggers
+-    DROP TRIGGER IF EXISTS update_archon_tasks_updated_at ON archon_tasks;
+-    DROP TRIGGER IF EXISTS update_tasks_updated_at ON tasks;
+-    
+-    -- Prompts table triggers
+-    DROP TRIGGER IF EXISTS update_archon_prompts_updated_at ON archon_prompts;
+-    DROP TRIGGER IF EXISTS update_prompts_updated_at ON prompts;
++    -- Drop all triggers on all Archon tables dynamically
++    FOR trigger_record IN 
++        SELECT schemaname, tablename, triggername
++        FROM pg_triggers 
++        WHERE schemaname = 'public' 
++        AND (tablename LIKE 'archon_%' OR tablename IN ('settings', 'projects', 'tasks', 'prompts', 'crawled_pages', 'code_examples', 'sources', 'document_versions', 'project_sources'))
++    LOOP
++        BEGIN
++            EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I.%I CASCADE', 
++                trigger_record.triggername, trigger_record.schemaname, trigger_record.tablename);
++            RAISE NOTICE 'Dropped trigger % on %.%', trigger_record.triggername, trigger_record.schemaname, trigger_record.tablename;
++        EXCEPTION WHEN OTHERS THEN
++            RAISE NOTICE 'Could not drop trigger %: %', trigger_record.triggername, SQLERRM;
++        END;
++    END LOOP;
+     
+-    RAISE NOTICE 'Triggers dropped successfully.';
++    RAISE NOTICE 'All triggers cleanup completed.';
+     
+ EXCEPTION WHEN OTHERS THEN
+-    RAISE NOTICE 'Some triggers may not exist: %', SQLERRM;
++    RAISE NOTICE 'Trigger cleanup had warnings: %', SQLERRM;
+ END $$;
+ 
+ -- ======================================================================
+@@ -123,29 +125,34 @@ END $$;
+ -- ======================================================================
+ 
+ DO $$
++DECLARE
++    function_record RECORD;
+ BEGIN
+-    RAISE NOTICE 'Dropping functions...';
+-    
+-    -- Update timestamp function (used by triggers)
+-    DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+-    
+-    -- Search functions (new with archon_ prefix)
+-    DROP FUNCTION IF EXISTS match_archon_crawled_pages(vector, int, jsonb, text) CASCADE;
+-    DROP FUNCTION IF EXISTS match_archon_code_examples(vector, int, jsonb, text) CASCADE;
+-    
+-
+-    
+-    -- Search functions (old without prefix)
+-    DROP FUNCTION IF EXISTS match_crawled_pages(vector, int, jsonb, text) CASCADE;
+-    DROP FUNCTION IF EXISTS match_code_examples(vector, int, jsonb, text) CASCADE;
+-    
+-    -- Task management functions
+-    DROP FUNCTION IF EXISTS archive_task(UUID, TEXT) CASCADE;
++    RAISE NOTICE 'Dropping all custom functions...';
++    
++    -- Drop all custom functions in public schema (excluding system functions)
++    FOR function_record IN 
++        SELECT p.proname, n.nspname, 
++               pg_get_function_identity_arguments(p.oid) as args
++        FROM pg_proc p
++        JOIN pg_namespace n ON p.pronamespace = n.oid
++        WHERE n.nspname = 'public'
++        AND p.proname NOT LIKE 'pg_%'
++        AND p.proname NOT LIKE 'sql_%'
++    LOOP
++        BEGIN
++            EXECUTE format('DROP FUNCTION IF EXISTS %I.%I(%s) CASCADE', 
++                function_record.nspname, function_record.proname, function_record.args);
++            RAISE NOTICE 'Dropped function %.%(%s)', function_record.nspname, function_record.proname, function_record.args;
++        EXCEPTION WHEN OTHERS THEN
++            RAISE NOTICE 'Could not drop function %.%: %', function_record.nspname, function_record.proname, SQLERRM;
++        END;
++    END LOOP;
+     
+-    RAISE NOTICE 'Functions dropped successfully.';
++    RAISE NOTICE 'All functions cleanup completed.';
+     
+ EXCEPTION WHEN OTHERS THEN
+-    RAISE NOTICE 'Some functions may not exist: %', SQLERRM;
++    RAISE NOTICE 'Function cleanup had warnings: %', SQLERRM;
+ END $$;
+ 
+ -- ======================================================================
+-- 
+2.39.5
+

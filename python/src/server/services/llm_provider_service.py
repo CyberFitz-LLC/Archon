@@ -101,10 +101,16 @@ async def get_llm_client(provider: str | None = None, use_embedding_provider: bo
             logger.info("OpenAI client created successfully")
 
         elif provider_name == "ollama":
+            # Ollama requires base_url to be explicitly configured
+            if not base_url:
+                raise ValueError(
+                    "Ollama requires LLM_BASE_URL to be configured. "
+                    "Please set it in the Settings page (e.g., http://localhost:11434/v1)"
+                )
             # Ollama requires an API key in the client but doesn't actually use it
             client = openai.AsyncOpenAI(
                 api_key="ollama",  # Required but unused by Ollama
-                base_url=base_url or "http://localhost:11434/v1",
+                base_url=base_url,
             )
             logger.info(f"Ollama client created successfully with base URL: {base_url}")
 
@@ -173,8 +179,11 @@ async def get_embedding_model(provider: str | None = None) -> str:
         if provider_name == "openai":
             return "text-embedding-3-small"
         elif provider_name == "ollama":
-            # Ollama default embedding model
-            return "nomic-embed-text"
+            # Ollama requires explicit embedding model configuration
+            raise ValueError(
+                "Ollama requires EMBEDDING_MODEL to be configured. "
+                "Please set it in the Settings page (e.g., nomic-embed-text, mxbai-embed-large)"
+            )
         elif provider_name == "google":
             # Google's embedding model
             return "text-embedding-004"
