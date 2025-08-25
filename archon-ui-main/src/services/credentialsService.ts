@@ -53,6 +53,23 @@ export interface CodeExtractionSettings {
   ENABLE_CODE_SUMMARIES: boolean;
 }
 
+export interface OllamaInstance {
+  id: string;
+  name: string;
+  baseUrl: string;
+  isEnabled: boolean;
+  isPrimary: boolean;
+  loadBalancingWeight: number;
+  instanceType?: 'chat' | 'embedding' | 'both'; // Support separate chat/embedding hosts
+  healthStatus?: {
+    isHealthy: boolean;
+    responseTimeMs?: number;
+    modelsAvailable?: number;
+    error?: string;
+    lastChecked?: number;
+  };
+}
+
 import { getApiUrl } from "../config/api";
 
 class CredentialsService {
@@ -365,6 +382,215 @@ class CredentialsService {
     }
 
     await Promise.all(promises);
+  }
+
+  async migrateOllamaFromLocalStorage(): Promise<{ migrated: boolean; instanceCount: number }> {
+    try {
+      const saved = localStorage.getItem('ollama-instances');
+      if (!saved) {
+        return { migrated: false, instanceCount: 0 };
+      }
+
+      const localInstances: OllamaInstance[] = JSON.parse(saved);
+      if (localInstances.length === 0) {
+        return { migrated: false, instanceCount: 0 };
+      }
+
+      // Check if instances are already in database
+      const existingInstances = await this.getOllamaInstances();
+      if (existingInstances.length > 0) {
+        return { migrated: false, instanceCount: 0 };
+      }
+
+      // Migrate instances to database
+      await this.setOllamaInstances(localInstances);
+      
+      // Clear localStorage after successful migration
+      localStorage.removeItem('ollama-instances');
+      
+      return { migrated: true, instanceCount: localInstances.length };
+    } catch (error) {
+      console.error('Failed to migrate Ollama instances from localStorage:', error);
+      return { migrated: false, instanceCount: 0 };
+    }
+  }
+
+  async getOllamaInstances(): Promise<OllamaInstance[]> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/credentials/ollama_instances`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Ollama instances: HTTP ${response.status}`);
+      }
+      const result = await response.json();
+      return result.instances || [];
+    } catch (error) {
+      throw this.handleCredentialError(error, 'Getting Ollama instances');
+    }
+  }
+
+  async setOllamaInstances(instances: OllamaInstance[]): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/credentials/ollama_instances`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ instances }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+    } catch (error) {
+      throw this.handleCredentialError(error, 'Setting Ollama instances');
+    }
+  }
+
+  async addOllamaInstance(instance: OllamaInstance): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/credentials/ollama_instances`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(instance),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+    } catch (error) {
+      throw this.handleCredentialError(error, `Adding Ollama instance '${instance.name}'`);
+    }
+  }
+
+  async removeOllamaInstance(instanceId: string): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/credentials/ollama_instances/${instanceId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+    } catch (error) {
+      throw this.handleCredentialError(error, `Removing Ollama instance '${instanceId}'`);
+    }
+  }
+
+  async updateOllamaInstance(instanceId: string, updates: Partial<OllamaInstance>): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/credentials/ollama_instances/${instanceId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updates),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+    } catch (error) {
+      throw this.handleCredentialError(error, `Updating Ollama instance '${instanceId}'`);
+    }
+  }
+
+  async discoverOllamaModels(hosts: string[]): Promise<{
+    chat_models: any[];
+    embedding_models: any[];
+    host_status: Record<string, any>;
+    total_models: number;
+    discovery_errors: string[];
+  }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/providers/ollama/models`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          hosts,
+          timeout_seconds: 10
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      throw this.handleCredentialError(error, 'Discovering Ollama models');
+    }
+  }
+
+  async validateProviderConfig(provider: string, config: {
+    api_key?: string;
+    base_url?: string;
+    additional_config?: Record<string, any>;
+  }): Promise<{
+    is_valid: boolean;
+    error_message?: string;
+    available_models: any[];
+    health_status: any;
+  }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/providers/validate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          provider,
+          api_key: config.api_key,
+          base_url: config.base_url,
+          additional_config: config.additional_config || {}
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      throw this.handleCredentialError(error, `Validating ${provider} provider config`);
+    }
+  }
+
+  async getProviderModels(provider: string): Promise<any[]> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/providers/${provider}/models`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      throw this.handleCredentialError(error, `Getting ${provider} models`);
+    }
+  }
+
+  async getAllProviderModels(): Promise<Record<string, any[]>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/providers/models`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      throw this.handleCredentialError(error, 'Getting all provider models');
+    }
   }
 }
 

@@ -54,3 +54,12 @@ async def broadcast_crawl_progress(progress_id: str, data: dict):
     await sio.emit("crawl_progress", data, room=progress_id)
     await asyncio.sleep(0)  # Yield control to event loop
     logger.info(f"✅ [SOCKETIO] Broadcasted crawl progress for {progress_id}")
+
+
+async def emit_provider_status_update(event_type: str, data: dict):
+    """Broadcast provider status updates to all subscribers."""
+    await sio.emit("provider_status_update", {
+        "event_type": event_type,
+        "data": data
+    })
+    logger.info(f"✅ [SOCKETIO] Broadcasted provider status update: {event_type}")

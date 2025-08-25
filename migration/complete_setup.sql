@@ -94,7 +94,9 @@ INSERT INTO archon_settings (key, encrypted_value, is_encrypted, category, descr
 INSERT INTO archon_settings (key, value, is_encrypted, category, description) VALUES
 ('LLM_PROVIDER', 'openai', false, 'rag_strategy', 'LLM provider to use: openai, ollama, or google'),
 ('LLM_BASE_URL', NULL, false, 'rag_strategy', 'Custom base URL for LLM provider (mainly for Ollama, e.g., http://localhost:11434/v1)'),
-('EMBEDDING_MODEL', 'text-embedding-3-small', false, 'rag_strategy', 'Embedding model for vector search and similarity matching (required for all embedding operations)')
+('EMBEDDING_MODEL', 'text-embedding-3-small', false, 'rag_strategy', 'Embedding model for vector search and similarity matching (required for all embedding operations)'),
+('SUPPORTED_EMBEDDING_DIMENSIONS', '768,1024,1536,3072', false, 'embeddings', 'Supported embedding dimensions for multi-dimensional vector storage'),
+('DEFAULT_EMBEDDING_DIMENSION', '1536', false, 'embeddings', 'Default embedding dimension for new content')
 ON CONFLICT (key) DO NOTHING;
 
 -- Add provider API key placeholders
@@ -195,7 +197,10 @@ CREATE TABLE IF NOT EXISTS archon_crawled_pages (
     content TEXT NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_id TEXT NOT NULL,
-    embedding VECTOR(1536),  -- OpenAI embeddings are 1536 dimensions
+    embedding_1536 VECTOR(1536), -- 1536-dimensional embeddings (default)
+    embedding_768 VECTOR(768),   -- 768-dimensional embeddings
+    embedding_1024 VECTOR(1024), -- 1024-dimensional embeddings  
+    embedding_3072 VECTOR(3072), -- 3072-dimensional embeddings
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
 
     -- Add a unique constraint to prevent duplicate chunks for the same URL
@@ -206,7 +211,11 @@ CREATE TABLE IF NOT EXISTS archon_crawled_pages (
 );
 
 -- Create indexes for better performance
-CREATE INDEX ON archon_crawled_pages USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX ON archon_crawled_pages USING ivfflat (embedding_1536 vector_cosine_ops);
+-- Multi-dimensional embedding indexes (noting pgvector's 2000 dimension limit)
+CREATE INDEX ON archon_crawled_pages USING ivfflat (embedding_768 vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX ON archon_crawled_pages USING ivfflat (embedding_1024 vector_cosine_ops) WITH (lists = 100);
+-- Note: 3072 dimensions exceed pgvector's 2000 dimension index limit, will use sequential scans
 CREATE INDEX idx_archon_crawled_pages_metadata ON archon_crawled_pages USING GIN (metadata);
 CREATE INDEX idx_archon_crawled_pages_source_id ON archon_crawled_pages (source_id);
 
@@ -219,7 +228,10 @@ CREATE TABLE IF NOT EXISTS archon_code_examples (
     summary TEXT NOT NULL,  -- Summary of the code example
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_id TEXT NOT NULL,
-    embedding VECTOR(1536),  -- OpenAI embeddings are 1536 dimensions
+    embedding_1536 VECTOR(1536), -- 1536-dimensional embeddings (default)
+    embedding_768 VECTOR(768),   -- 768-dimensional embeddings
+    embedding_1024 VECTOR(1024), -- 1024-dimensional embeddings  
+    embedding_3072 VECTOR(3072), -- 3072-dimensional embeddings
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
 
     -- Add a unique constraint to prevent duplicate chunks for the same URL
@@ -230,7 +242,11 @@ CREATE TABLE IF NOT EXISTS archon_code_examples (
 );
 
 -- Create indexes for better performance
-CREATE INDEX ON archon_code_examples USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX ON archon_code_examples USING ivfflat (embedding_1536 vector_cosine_ops);
+-- Multi-dimensional embedding indexes (noting pgvector's 2000 dimension limit)
+CREATE INDEX ON archon_code_examples USING ivfflat (embedding_768 vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX ON archon_code_examples USING ivfflat (embedding_1024 vector_cosine_ops) WITH (lists = 100);
+-- Note: 3072 dimensions exceed pgvector's 2000 dimension index limit, will use sequential scans
 CREATE INDEX idx_archon_code_examples_metadata ON archon_code_examples USING GIN (metadata);
 CREATE INDEX idx_archon_code_examples_source_id ON archon_code_examples (source_id);
 
@@ -265,11 +281,12 @@ BEGIN
     content,
     metadata,
     source_id,
-    1 - (archon_crawled_pages.embedding <=> query_embedding) AS similarity
+    1 - (archon_crawled_pages.embedding_1536 <=> query_embedding) AS similarity
   FROM archon_crawled_pages
   WHERE metadata @> filter
     AND (source_filter IS NULL OR source_id = source_filter)
-  ORDER BY archon_crawled_pages.embedding <=> query_embedding
+    AND archon_crawled_pages.embedding_1536 IS NOT NULL
+  ORDER BY archon_crawled_pages.embedding_1536 <=> query_embedding
   LIMIT match_count;
 END;
 $$;
@@ -303,11 +320,12 @@ BEGIN
     summary,
     metadata,
     source_id,
-    1 - (archon_code_examples.embedding <=> query_embedding) AS similarity
+    1 - (archon_code_examples.embedding_1536 <=> query_embedding) AS similarity
   FROM archon_code_examples
   WHERE metadata @> filter
     AND (source_filter IS NULL OR source_id = source_filter)
-  ORDER BY archon_code_examples.embedding <=> query_embedding
+    AND archon_code_examples.embedding_1536 IS NOT NULL
+  ORDER BY archon_code_examples.embedding_1536 <=> query_embedding
   LIMIT match_count;
 END;
 $$;
@@ -782,6 +800,134 @@ You are the Data-Builder Agent. Your purpose is to transform descriptions of dat
 ⸻
 
 Remember: Create production-ready data models.', 'System prompt for creating data models in the data array');
+
+-- =====================================================
+-- SECTION 11: MULTI-DIMENSIONAL VECTOR UTILITY FUNCTIONS
+-- =====================================================
+
+-- Function to detect embedding dimension from vector
+CREATE OR REPLACE FUNCTION detect_embedding_dimension(embedding_vector vector)
+RETURNS INTEGER AS $$
+BEGIN
+    RETURN array_length(embedding_vector::float[], 1);
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- Function to get the appropriate column name for a dimension
+CREATE OR REPLACE FUNCTION get_embedding_column_name(dimension INTEGER)
+RETURNS TEXT AS $$
+BEGIN
+    CASE dimension
+        WHEN 768 THEN RETURN 'embedding_768';
+        WHEN 1024 THEN RETURN 'embedding_1024';
+        WHEN 1536 THEN RETURN 'embedding_1536';  -- default column
+        WHEN 3072 THEN RETURN 'embedding_3072';
+        ELSE RAISE EXCEPTION 'Unsupported embedding dimension: %', dimension;
+    END CASE;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- Enhanced search function for documentation with automatic dimension detection
+CREATE OR REPLACE FUNCTION match_archon_crawled_pages_multi_dim (
+  query_embedding VECTOR,
+  match_count INT DEFAULT 10,
+  filter JSONB DEFAULT '{}'::jsonb,
+  source_filter TEXT DEFAULT NULL
+) RETURNS TABLE (
+  id BIGINT,
+  url VARCHAR,
+  chunk_number INTEGER,
+  content TEXT,
+  metadata JSONB,
+  source_id TEXT,
+  similarity FLOAT
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    dimension_size INTEGER;
+    column_name TEXT;
+    query_sql TEXT;
+BEGIN
+    -- Detect the dimension of the query embedding
+    dimension_size := detect_embedding_dimension(query_embedding);
+    column_name := get_embedding_column_name(dimension_size);
+    
+    -- Build dynamic query based on dimension
+    query_sql := format('
+        SELECT
+            id,
+            url,
+            chunk_number,
+            content,
+            metadata,
+            source_id,
+            1 - (%I <=> $1) AS similarity
+        FROM archon_crawled_pages
+        WHERE metadata @> $2
+            AND ($3 IS NULL OR source_id = $3)
+            AND %I IS NOT NULL
+        ORDER BY %I <=> $1
+        LIMIT $4',
+        column_name, column_name, column_name
+    );
+    
+    -- Execute the dynamic query
+    RETURN QUERY EXECUTE query_sql USING query_embedding, filter, source_filter, match_count;
+END;
+$$;
+
+-- Enhanced search function for code examples with automatic dimension detection
+CREATE OR REPLACE FUNCTION match_archon_code_examples_multi_dim (
+  query_embedding VECTOR,
+  match_count INT DEFAULT 10,
+  filter JSONB DEFAULT '{}'::jsonb,
+  source_filter TEXT DEFAULT NULL
+) RETURNS TABLE (
+  id BIGINT,
+  url VARCHAR,
+  chunk_number INTEGER,
+  content TEXT,
+  summary TEXT,
+  metadata JSONB,
+  source_id TEXT,
+  similarity FLOAT
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    dimension_size INTEGER;
+    column_name TEXT;
+    query_sql TEXT;
+BEGIN
+    -- Detect the dimension of the query embedding
+    dimension_size := detect_embedding_dimension(query_embedding);
+    column_name := get_embedding_column_name(dimension_size);
+    
+    -- Build dynamic query based on dimension
+    query_sql := format('
+        SELECT
+            id,
+            url,
+            chunk_number,
+            content,
+            summary,
+            metadata,
+            source_id,
+            1 - (%I <=> $1) AS similarity
+        FROM archon_code_examples
+        WHERE metadata @> $2
+            AND ($3 IS NULL OR source_id = $3)
+            AND %I IS NOT NULL
+        ORDER BY %I <=> $1
+        LIMIT $4',
+        column_name, column_name, column_name
+    );
+    
+    -- Execute the dynamic query
+    RETURN QUERY EXECUTE query_sql USING query_embedding, filter, source_filter, match_count;
+END;
+$$;
 
 -- =====================================================
 -- SETUP COMPLETE

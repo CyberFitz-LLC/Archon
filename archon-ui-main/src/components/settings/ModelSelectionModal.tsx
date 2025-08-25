@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Badge } from '../ui/Badge';
 import { Provider } from './ProviderTileButton';
+import { credentialsService } from '../../services/credentialsService';
 
 export interface ModelSpec {
   id: string;
@@ -262,145 +263,144 @@ export const ModelSelectionModal: React.FC<ModelSelectionModalProps> = ({
     setLoadingModels(true);
     try {
       if (provider === 'ollama') {
-        // For Ollama, get the configured hosts from localStorage
-        const getConfiguredOllamaHosts = () => {
+        // For Ollama, get the configured hosts from database
+        const getConfiguredOllamaHosts = async () => {
           try {
-            const saved = localStorage.getItem('ollama-instances');
-            if (saved) {
-              const instances = JSON.parse(saved);
-              return instances
-                .filter((inst: any) => inst.isEnabled)
-                .map((inst: any) => inst.baseUrl);
+            const instances = await credentialsService.getOllamaInstances();
+            const enabledHosts = instances
+              .filter((inst: any) => inst.isEnabled)
+              .map((inst: any) => inst.baseUrl);
+            
+            if (enabledHosts.length > 0) {
+              return enabledHosts;
             }
           } catch (error) {
-            console.error('Failed to load Ollama instances from localStorage:', error);
+            console.error('Failed to load Ollama instances from database:', error);
+            
+            // Fallback to localStorage
+            try {
+              const saved = localStorage.getItem('ollama-instances');
+              if (saved) {
+                const localInstances = JSON.parse(saved);
+                return localInstances
+                  .filter((inst: any) => inst.isEnabled)
+                  .map((inst: any) => inst.baseUrl);
+              }
+            } catch (localError) {
+              console.error('Failed to load from localStorage as fallback:', localError);
+            }
           }
-          // Fallback to default host
+          // Final fallback to default host
           return ['http://localhost:11434'];
         };
         
-        const hosts = getConfiguredOllamaHosts();
+        const hosts = await getConfiguredOllamaHosts();
         
-        const discovery = await fetch('/api/providers/ollama/models', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            hosts,
-            timeout_seconds: 10,
+        const discoveryData = await credentialsService.discoverOllamaModels(hosts);
+        setOllamaDiscovery(discoveryData);
+        
+        // Convert Ollama models to ModelSpec format with enhanced details
+        const allOllamaModels = [
+          ...discoveryData.chat_models.map((model: any) => {
+            // Enhanced context window calculation
+            const defaultContext = model.context_window || 4096;
+            const getContextWindowLimits = (contextWindow: number, modelName: string) => {
+              const name = modelName.toLowerCase();
+              let minContext = 1024; // Standard minimum
+              let maxContext = contextWindow;
+              
+              // Estimate max context based on model capabilities
+              if (name.includes('llama3') || name.includes('llama-3')) {
+                maxContext = Math.max(contextWindow, 8192);
+              } else if (name.includes('qwen')) {
+                maxContext = Math.max(contextWindow, 32768);
+              } else if (name.includes('mistral')) {
+                maxContext = Math.max(contextWindow, 32768);
+              } else if (name.includes('gemma')) {
+                maxContext = Math.max(contextWindow, 8192);
+              } else if (name.includes('phi')) {
+                maxContext = Math.max(contextWindow, 4096);
+              } else {
+                // For unknown models, assume some expandability
+                maxContext = Math.max(contextWindow, contextWindow * 2);
+              }
+              
+              return { minContext, maxContext };
+            };
+            
+            const { minContext, maxContext } = getContextWindowLimits(defaultContext, model.name);
+            
+            return {
+              id: `${model.name}@${model.host}`,
+              name: model.name,
+              displayName: model.name,
+              provider: 'ollama' as Provider,
+              type: 'chat' as const,
+              contextWindow: defaultContext,
+              maxContextWindow: maxContext,
+              minContextWindow: minContext,
+              toolSupport: model.supports_tools,
+              performance: { speed: 'medium', quality: 'high' },
+              capabilities: [
+                'Text Generation', 
+                'Local Processing',
+                ...(model.supports_tools ? ['Function Calling'] : []),
+                ...(model.supports_thinking ? ['Thinking'] : [])
+              ],
+              useCase: ['Local AI', 'Privacy', 'Offline Processing'],
+              status: 'available' as const,
+              description: `${model.family || 'Ollama'} model running on ${new URL(model.host).hostname}`,
+              size_gb: model.size_gb,
+              family: model.family,
+              hostInfo: {
+                host: model.host,
+                family: model.family,
+                size_gb: model.size_gb,
+                context_window: defaultContext,
+                max_context_window: maxContext,
+                min_context_window: minContext,
+                supports_tools: model.supports_tools,
+                supports_thinking: model.supports_thinking,
+              },
+            };
           }),
-        });
-
-        if (discovery.ok) {
-          const discoveryData = await discovery.json();
-          setOllamaDiscovery(discoveryData);
-          
-          // Convert Ollama models to ModelSpec format with enhanced details
-          const allOllamaModels = [
-            ...discoveryData.chat_models.map((model: any) => {
-              // Enhanced context window calculation
-              const defaultContext = model.context_window || 4096;
-              const getContextWindowLimits = (contextWindow: number, modelName: string) => {
-                const name = modelName.toLowerCase();
-                let minContext = 1024; // Standard minimum
-                let maxContext = contextWindow;
-                
-                // Estimate max context based on model capabilities
-                if (name.includes('llama3') || name.includes('llama-3')) {
-                  maxContext = Math.max(contextWindow, 8192);
-                } else if (name.includes('qwen')) {
-                  maxContext = Math.max(contextWindow, 32768);
-                } else if (name.includes('mistral')) {
-                  maxContext = Math.max(contextWindow, 32768);
-                } else if (name.includes('gemma')) {
-                  maxContext = Math.max(contextWindow, 8192);
-                } else if (name.includes('phi')) {
-                  maxContext = Math.max(contextWindow, 4096);
-                } else {
-                  // For unknown models, assume some expandability
-                  maxContext = Math.max(contextWindow, contextWindow * 2);
-                }
-                
-                return { minContext, maxContext };
-              };
-              
-              const { minContext, maxContext } = getContextWindowLimits(defaultContext, model.name);
-              
-              return {
-                id: `${model.name}@${model.host}`,
-                name: model.name,
-                displayName: model.name,
-                provider: 'ollama' as Provider,
-                type: 'chat' as const,
-                contextWindow: defaultContext,
-                maxContextWindow: maxContext,
-                minContextWindow: minContext,
-                toolSupport: model.supports_tools,
-                performance: { speed: 'medium', quality: 'high' },
-                capabilities: [
-                  'Text Generation', 
-                  'Local Processing',
-                  ...(model.supports_tools ? ['Function Calling'] : []),
-                  ...(model.supports_thinking ? ['Thinking'] : [])
-                ],
-                useCase: ['Local AI', 'Privacy', 'Offline Processing'],
-                status: 'available' as const,
-                description: `${model.family || 'Ollama'} model running on ${new URL(model.host).hostname}`,
-                size_gb: model.size_gb,
+          ...discoveryData.embedding_models.map((model: any) => {
+            const defaultContext = model.context_window || 512;
+            const maxContext = Math.max(defaultContext, 2048); // Embedding models typically have smaller context windows
+            const minContext = 128;
+            
+            return {
+              id: `${model.name}@${model.host}`,
+              name: model.name,
+              displayName: model.name,
+              provider: 'ollama' as Provider,
+              type: 'embedding' as const,
+              contextWindow: defaultContext,
+              maxContextWindow: maxContext,
+              minContextWindow: minContext,
+              dimensions: model.embedding_dimensions,
+              toolSupport: false,
+              performance: { speed: 'fast', quality: 'medium' },
+              capabilities: ['Text Embeddings', 'Local Processing', 'Semantic Search'],
+              useCase: ['Private Search', 'Local RAG', 'Offline Embeddings'],
+              status: 'available' as const,
+              description: `${model.family || 'Embedding'} model (${model.embedding_dimensions}D) on ${new URL(model.host).hostname}`,
+              size_gb: model.size_gb,
+              family: model.family,
+              hostInfo: {
+                host: model.host,
                 family: model.family,
-                hostInfo: {
-                  host: model.host,
-                  family: model.family,
-                  size_gb: model.size_gb,
-                  context_window: defaultContext,
-                  max_context_window: maxContext,
-                  min_context_window: minContext,
-                  supports_tools: model.supports_tools,
-                  supports_thinking: model.supports_thinking,
-                },
+                size_gb: model.size_gb,
+                context_window: defaultContext,
+                max_context_window: maxContext,
+                min_context_window: minContext,
+                embedding_dimensions: model.embedding_dimensions,
+              },
               };
             }),
-            ...discoveryData.embedding_models.map((model: any) => {
-              const defaultContext = model.context_window || 512;
-              const maxContext = Math.max(defaultContext, 2048); // Embedding models typically have smaller context windows
-              const minContext = 128;
-              
-              return {
-                id: `${model.name}@${model.host}`,
-                name: model.name,
-                displayName: model.name,
-                provider: 'ollama' as Provider,
-                type: 'embedding' as const,
-                contextWindow: defaultContext,
-                maxContextWindow: maxContext,
-                minContextWindow: minContext,
-                dimensions: model.embedding_dimensions,
-                toolSupport: false,
-                performance: { speed: 'fast', quality: 'medium' },
-                capabilities: ['Text Embeddings', 'Local Processing', 'Semantic Search'],
-                useCase: ['Private Search', 'Local RAG', 'Offline Embeddings'],
-                status: 'available' as const,
-                description: `${model.family || 'Embedding'} model (${model.embedding_dimensions}D) on ${new URL(model.host).hostname}`,
-                size_gb: model.size_gb,
-                family: model.family,
-                hostInfo: {
-                  host: model.host,
-                  family: model.family,
-                  size_gb: model.size_gb,
-                  context_window: defaultContext,
-                  max_context_window: maxContext,
-                  min_context_window: minContext,
-                  embedding_dimensions: model.embedding_dimensions,
-                },
-              };
-            }),
-          ];
+        ];
 
-          setModels(allOllamaModels);
-        } else {
-          throw new Error('Failed to discover Ollama models');
-        }
+        setModels(allOllamaModels);
       } else {
         // For other providers, use mock data since we don't have API endpoints yet
         setModels(getMockModels(provider));
@@ -412,7 +412,7 @@ export const ModelSelectionModal: React.FC<ModelSelectionModalProps> = ({
     } finally {
       setLoadingModels(false);
     }
-  };;
+  };
 
   const handleRefresh = () => {
     setRefreshKey(prev => prev + 1);

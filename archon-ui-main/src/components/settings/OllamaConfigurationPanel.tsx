@@ -11,6 +11,7 @@ interface OllamaConfigurationPanelProps {
   isVisible: boolean;
   onConfigChange: (instances: OllamaInstance[]) => void;
   className?: string;
+  separateHosts?: boolean; // Enable separate LLM Chat and Embedding host configuration
 }
 
 interface ConnectionTestResult {
@@ -23,14 +24,18 @@ interface ConnectionTestResult {
 const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
   isVisible,
   onConfigChange,
-  className = ''
+  className = '',
+  separateHosts = false
 }) => {
   const [instances, setInstances] = useState<OllamaInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [testingConnections, setTestingConnections] = useState<Set<string>>(new Set());
   const [newInstanceUrl, setNewInstanceUrl] = useState('');
   const [newInstanceName, setNewInstanceName] = useState('');
+  const [newInstanceType, setNewInstanceType] = useState<'chat' | 'embedding'>('chat');
   const [showAddInstance, setShowAddInstance] = useState(false);
+  const [discoveringModels, setDiscoveringModels] = useState(false);
+  const [modelDiscoveryResults, setModelDiscoveryResults] = useState<any>(null);
   const { showToast } = useToast();
 
   // Load instances from database
@@ -196,7 +201,8 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
       baseUrl: newInstanceUrl.trim(),
       isEnabled: true,
       isPrimary: false,
-      loadBalancingWeight: 100
+      loadBalancingWeight: 100,
+      instanceType: separateHosts ? newInstanceType : 'both'
     };
 
     try {
@@ -208,6 +214,7 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
       
       setNewInstanceUrl('');
       setNewInstanceName('');
+      setNewInstanceType('chat');
       setShowAddInstance(false);
       
       showToast(`Added new Ollama instance: ${newInstance.name}`, 'success');
@@ -291,6 +298,47 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
     }
   };
 
+  // Discover models from all enabled instances
+  const handleDiscoverModels = async () => {
+    if (instances.length === 0) {
+      showToast('No Ollama instances configured', 'error');
+      return;
+    }
+
+    const enabledInstances = instances.filter(inst => inst.isEnabled);
+    if (enabledInstances.length === 0) {
+      showToast('No enabled Ollama instances found', 'error');
+      return;
+    }
+
+    setDiscoveringModels(true);
+    try {
+      const hosts = enabledInstances.map(inst => inst.baseUrl);
+      const results = await credentialsService.discoverOllamaModels(hosts);
+      
+      setModelDiscoveryResults(results);
+      
+      const totalModels = results.total_models;
+      const chatModels = results.chat_models.length;
+      const embeddingModels = results.embedding_models.length;
+      
+      showToast(
+        `Discovery complete: Found ${totalModels} models (${chatModels} chat, ${embeddingModels} embedding)`,
+        'success'
+      );
+
+      if (results.discovery_errors.length > 0) {
+        console.warn('Discovery errors:', results.discovery_errors);
+        showToast(`Some hosts had errors: ${results.discovery_errors.length} issues`, 'warning');
+      }
+    } catch (error) {
+      console.error('Failed to discover Ollama models:', error);
+      showToast(`Model discovery failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    } finally {
+      setDiscoveringModels(false);
+    }
+  };
+
   // Load instances from database on mount
   useEffect(() => {
     loadInstances();
@@ -358,9 +406,20 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
             Configure Ollama instances for distributed processing
           </p>
         </div>
-        <Badge variant="outline" className="text-xs">
-          {instances.filter(inst => inst.isEnabled).length} Active
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDiscoverModels}
+            disabled={discoveringModels || instances.filter(inst => inst.isEnabled).length === 0}
+            className="text-xs"
+          >
+            {discoveringModels ? 'Discovering...' : 'Discover Models'}
+          </Button>
+          <Badge variant="outline" className="text-xs">
+            {instances.filter(inst => inst.isEnabled).length} Active
+          </Badge>
+        </div>
       </div>
 
       {/* Instance List */}
@@ -375,6 +434,24 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
                   </span>
                   {instance.isPrimary && (
                     <Badge variant="outline" className="text-xs">Primary</Badge>
+                  )}
+                  {instance.instanceType && instance.instanceType !== 'both' && (
+                    <Badge 
+                      variant="solid" 
+                      className={cn(
+                        "text-xs",
+                        instance.instanceType === 'chat' 
+                          ? "bg-blue-100 text-blue-800 border-blue-200" 
+                          : "bg-purple-100 text-purple-800 border-purple-200"
+                      )}
+                    >
+                      {instance.instanceType === 'chat' ? 'Chat' : 'Embedding'}
+                    </Badge>
+                  )}
+                  {(!instance.instanceType || instance.instanceType === 'both') && separateHosts && (
+                    <Badge variant="outline" className="text-xs">
+                      Both
+                    </Badge>
                   )}
                   {getConnectionStatusBadge(instance)}
                 </div>
@@ -469,6 +546,40 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
               />
             </div>
             
+            {separateHosts && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                  Instance Type
+                </label>
+                <div className="flex gap-2">
+                  <Button
+                    variant={newInstanceType === 'chat' ? 'solid' : 'outline'}
+                    size="sm"
+                    onClick={() => setNewInstanceType('chat')}
+                    className={cn(
+                      newInstanceType === 'chat' 
+                        ? 'bg-blue-600 text-white' 
+                        : 'text-blue-600 border-blue-600'
+                    )}
+                  >
+                    LLM Chat
+                  </Button>
+                  <Button
+                    variant={newInstanceType === 'embedding' ? 'solid' : 'outline'}
+                    size="sm"
+                    onClick={() => setNewInstanceType('embedding')}
+                    className={cn(
+                      newInstanceType === 'embedding' 
+                        ? 'bg-blue-600 text-white' 
+                        : 'text-blue-600 border-blue-600'
+                    )}
+                  >
+                    Embedding
+                  </Button>
+                </div>
+              </div>
+            )}
+            
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -484,6 +595,7 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
                   setShowAddInstance(false);
                   setNewInstanceUrl('');
                   setNewInstanceName('');
+                  setNewInstanceType('chat');
                 }}
               >
                 Cancel
@@ -499,6 +611,58 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
         >
           <span className="text-gray-600 dark:text-gray-400">+ Add Ollama Instance</span>
         </Button>
+      )}
+
+      {/* Model Discovery Results */}
+      {modelDiscoveryResults && (
+        <Card className="p-4 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
+          <h4 className="font-medium text-green-900 dark:text-green-100 mb-3">
+            Model Discovery Results
+          </h4>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                {modelDiscoveryResults.total_models}
+              </div>
+              <div className="text-xs text-green-700 dark:text-green-300">
+                Total Models
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                {modelDiscoveryResults.chat_models.length}
+              </div>
+              <div className="text-xs text-blue-700 dark:text-blue-300">
+                Chat Models
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                {modelDiscoveryResults.embedding_models.length}
+              </div>
+              <div className="text-xs text-purple-700 dark:text-purple-300">
+                Embedding Models
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-gray-600 dark:text-gray-400">
+                {Object.keys(modelDiscoveryResults.host_status).filter(host => 
+                  modelDiscoveryResults.host_status[host].status === 'online'
+                ).length}
+              </div>
+              <div className="text-xs text-gray-700 dark:text-gray-300">
+                Online Hosts
+              </div>
+            </div>
+          </div>
+
+          {modelDiscoveryResults.discovery_errors.length > 0 && (
+            <div className="text-xs text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-900/30 p-2 rounded">
+              <strong>Errors:</strong> {modelDiscoveryResults.discovery_errors.join(', ')}
+            </div>
+          )}
+        </Card>
       )}
 
       {/* Configuration Summary */}
@@ -520,6 +684,14 @@ const OllamaConfigurationPanel: React.FC<OllamaConfigurationPanelProps> = ({
               {instances.filter(inst => inst.isEnabled).length > 1 ? 'Enabled' : 'Disabled'}
             </span>
           </div>
+          {modelDiscoveryResults && (
+            <div className="flex justify-between">
+              <span>Available Models:</span>
+              <span className="font-mono text-green-600 dark:text-green-400">
+                {modelDiscoveryResults.total_models}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </Card>
