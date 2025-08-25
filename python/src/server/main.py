@@ -26,6 +26,8 @@ from .api_routes.internal_api import router as internal_router
 from .api_routes.knowledge_api import router as knowledge_router
 from .api_routes.mcp_api import router as mcp_router
 from .api_routes.projects_api import router as projects_router
+from .api_routes.provider_config_api import router as provider_config_router
+from .api_routes.provider_discovery_api import router as provider_discovery_router
 
 # Import Socket.IO handlers to ensure they're registered
 from .api_routes import socketio_handlers  # This registers all Socket.IO event handlers
@@ -215,6 +217,8 @@ app.include_router(agent_chat_router)
 app.include_router(internal_router)
 app.include_router(coverage_router)
 app.include_router(bug_report_router)
+app.include_router(provider_config_router)
+app.include_router(provider_discovery_router)
 
 
 # Root endpoint

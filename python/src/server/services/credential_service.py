@@ -474,6 +474,74 @@ class CredentialService:
             logger.error(f"Error setting active provider {provider} for {service_type}: {e}")
             return False
 
+    async def get_ollama_instances(self) -> list[dict[str, Any]]:
+        """Get all configured Ollama instances."""
+        try:
+            instances_json = await self.get_credential("OLLAMA_INSTANCES")
+            if instances_json:
+                import json
+                return json.loads(instances_json)
+            return []
+        except Exception as e:
+            logger.error(f"Error getting Ollama instances: {e}")
+            return []
+
+    async def set_ollama_instances(self, instances: list[dict[str, Any]]) -> bool:
+        """Set the complete list of Ollama instances."""
+        try:
+            import json
+            instances_json = json.dumps(instances)
+            return await self.set_credential(
+                "OLLAMA_INSTANCES",
+                instances_json,
+                category="ollama_config",
+                description="Configured Ollama instances for distributed processing"
+            )
+        except Exception as e:
+            logger.error(f"Error setting Ollama instances: {e}")
+            return False
+
+    async def add_ollama_instance(self, instance: dict[str, Any]) -> bool:
+        """Add a new Ollama instance to the configuration."""
+        try:
+            instances = await self.get_ollama_instances()
+            
+            # Check for duplicate URLs
+            new_url = instance.get("baseUrl", "")
+            for existing in instances:
+                if existing.get("baseUrl") == new_url:
+                    logger.warning(f"Ollama instance with URL {new_url} already exists")
+                    return False
+            
+            # If this is marked as primary, unmark other primaries
+            if instance.get("isPrimary", False):
+                for existing in instances:
+                    existing["isPrimary"] = False
+            
+            instances.append(instance)
+            return await self.set_ollama_instances(instances)
+        except Exception as e:
+            logger.error(f"Error adding Ollama instance: {e}")
+            return False
+
+    async def remove_ollama_instance(self, instance_id: str) -> bool:
+        """Remove an Ollama instance from the configuration."""
+        try:
+            instances = await self.get_ollama_instances()
+            original_count = len(instances)
+            
+            # Filter out the instance with matching ID
+            instances = [inst for inst in instances if inst.get("id") != instance_id]
+            
+            if len(instances) == original_count:
+                logger.warning(f"Ollama instance with ID {instance_id} not found")
+                return False
+            
+            return await self.set_ollama_instances(instances)
+        except Exception as e:
+            logger.error(f"Error removing Ollama instance: {e}")
+            return False
+
 
 # Global instance
 credential_service = CredentialService()
